@@ -1,8 +1,18 @@
 {
   "name": "video-sequencer",
   "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
   "dependencies": {
+    "express": "^4.18.2",
     "fluent-ffmpeg": "^2.1.2",
-    "node-fetch": "^2.6.7"
+    "node-fetch": "^2.6.7",
+    "cors": "^2.8.5"
+  },
+  "engines": {
+    "node": "18.x"
   }
 }
