@@ -24,7 +24,7 @@ app.get('/', (req, res) => {
       'Heavy compression for smaller output',
       'Reduced resolution for faster processing',
       'Optimized codec settings',
-      'Memory usage optimization'
+      '5 seconds per video segment'
     ]
   });
 });
@@ -48,8 +48,8 @@ app.post('/api/sequence-videos', async (req, res) => {
       console.log('🔄 Converting videoUrls to timeline...');
       timeline = videoUrls.map((video, index) => ({
         url: video.mp4_url || video,
-        timestamp: index * 3, // Reduced to 3 seconds each
-        duration: 3
+        timestamp: index * 5, // 5 seconds each
+        duration: 5
       }));
     } else {
       return res.status(400).json({
@@ -58,8 +58,8 @@ app.post('/api/sequence-videos', async (req, res) => {
       });
     }
     
-    // Process all videos but with shorter durations
-    console.log(`📊 Processing ${timeline.length} video segments (3s each)`);
+    // Process all videos with 5 second durations
+    console.log(`📊 Processing ${timeline.length} video segments (5s each)`);
     
     // Create temp directory
     const tempDir = '/tmp';
@@ -145,28 +145,28 @@ app.post('/api/sequence-videos', async (req, res) => {
           '-c:v', 'libx264',
           '-c:a', 'aac',
           '-preset', 'faster', // Faster encoding
-          '-crf', '35', // Higher CRF = smaller file (was 28, now 35)
+          '-crf', '32', // Good compression (was 35, now 32 for better quality)
           
           // REDUCE RESOLUTION for smaller file
-          '-vf', 'scale=480:-2', // Scale to 480p width
+          '-vf', 'scale=640:-2', // Scale to 640p width (was 480, now 640)
           
           // REDUCE FRAME RATE
-          '-r', '20', // 20fps instead of original
+          '-r', '24', // 24fps (was 20, now 24 for smoother)
           
           // AUDIO COMPRESSION
-          '-b:a', '64k', // Low audio bitrate
-          '-ar', '22050', // Lower sample rate
+          '-b:a', '96k', // Audio bitrate (was 64k, now 96k)
+          '-ar', '44100', // Standard sample rate
           
           // OTHER OPTIMIZATIONS
           '-movflags', '+faststart',
           '-pix_fmt', 'yuv420p',
-          '-profile:v', 'baseline', // Baseline profile for compatibility
+          '-profile:v', 'baseline',
           '-level', '3.0'
         ])
         .output(outputPath)
         .on('start', (commandLine) => {
           console.log('🚀 FFmpeg started (high compression mode)');
-          console.log('Settings: 480p, 20fps, CRF35, 64k audio');
+          console.log('Settings: 640p, 24fps, CRF32, 96k audio, 5s per clip');
         })
         .on('progress', (progress) => {
           if (progress.percent) {
@@ -190,7 +190,7 @@ app.post('/api/sequence-videos', async (req, res) => {
         console.log('⏰ Compression timeout, killing process...');
         command.kill('SIGKILL');
         reject(new Error('Compression timeout'));
-      }, 180000); // 3 minutes for compression
+      }, 300000); // 5 minutes for compression
       
       command.on('end', () => {
         clearTimeout(timeout);
@@ -243,7 +243,7 @@ app.post('/api/sequence-videos', async (req, res) => {
         inputSizeMB: (totalSize / 1024 / 1024).toFixed(2),
         outputSizeKB: (outputBuffer.length / 1024).toFixed(2),
         compressionRatio: ((1 - outputBuffer.length / totalSize) * 100).toFixed(1) + '%',
-        settings: '480p, 20fps, CRF35, 64k audio'
+        settings: '640p, 24fps, CRF32, 96k audio, 5s per segment'
       },
       performance: {
         totalTimeMs: totalTime,
@@ -253,7 +253,7 @@ app.post('/api/sequence-videos', async (req, res) => {
       timeline: {
         totalSegments: localFiles.length,
         totalDuration: timeline.reduce((sum, seg) => sum + seg.duration, 0),
-        segmentDuration: '3 seconds each'
+        segmentDuration: '5 seconds each'
       }
     });
     
@@ -286,5 +286,5 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Video Sequencer API v2.3.0 running on port ${PORT}`);
   console.log(`📡 Health check: http://localhost:${PORT}/`);
   console.log(`🎬 Sequence endpoint: http://localhost:${PORT}/api/sequence-videos`);
-  console.log(`📉 Optimizations: Heavy compression, 480p, 20fps, CRF35`);
+  console.log(`📉 Optimizations: Heavy compression, 640p, 24fps, CRF32, 5s segments`);
 });
