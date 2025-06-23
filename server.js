@@ -16,14 +16,14 @@ app.use(express.json({ limit: '100mb' }));
 app.get('/', (req, res) => {
   res.json({ 
     status: 'Video Sequencer API is running!',
-    version: '2.3.1 - Fixed FFmpeg Filter',
+    version: '2.3.2 - Extended Timeout & Limits',
     endpoints: {
       sequence: 'POST /api/sequence-videos'
     }
   });
 });
 
-// Main video sequencing endpoint with fixed FFmpeg
+// Main video sequencing endpoint
 app.post('/api/sequence-videos', async (req, res) => {
   const startTime = Date.now();
   console.log('🎬 Received video sequencing request');
@@ -48,6 +48,12 @@ app.post('/api/sequence-videos', async (req, res) => {
       });
     }
     
+    // LIMIT TO 8 VIDEOS FOR RELIABILITY
+    if (timeline.length > 8) {
+      console.log(`⚠️ Limiting from ${timeline.length} to 8 videos for performance`);
+      timeline = timeline.slice(0, 8);
+    }
+    
     console.log(`📊 Processing ${timeline.length} video segments`);
     
     const tempDir = '/tmp';
@@ -62,7 +68,7 @@ app.post('/api/sequence-videos', async (req, res) => {
       try {
         console.log(`📥 Downloading segment ${i + 1}`);
         
-        const response = await fetch(segment.url, { timeout: 20000 });
+        const response = await fetch(segment.url, { timeout: 15000 }); // Reduced timeout
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         
         const buffer = await response.buffer();
@@ -70,7 +76,7 @@ app.post('/api/sequence-videos', async (req, res) => {
         fs.writeFileSync(filePath, buffer);
         
         localFiles.push(filePath);
-        console.log(`✅ Downloaded segment ${i + 1}`);
+        console.log(`✅ Downloaded segment ${i + 1}, size: ${(buffer.length / 1024).toFixed(2)} KB`);
         
       } catch (error) {
         console.error(`❌ Failed segment ${i + 1}:`, error.message);
@@ -84,34 +90,36 @@ app.post('/api/sequence-videos', async (req, res) => {
       });
     }
     
-    console.log('🎥 Starting FFmpeg processing...');
+    console.log(`🎥 Starting FFmpeg processing with ${localFiles.length} files...`);
     
-    // SIMPLE CONCAT APPROACH (Fixed)
+    // Create concat file
     const concatContent = localFiles.map(file => `file '${file}'`).join('\n');
     const concatPath = path.join(tempDir, 'concat.txt');
     fs.writeFileSync(concatPath, concatContent);
     
+    console.log('📝 Concat file created');
+    
     const outputPath = path.join(tempDir, `output_${Date.now()}.mp4`);
     
     await new Promise((resolve, reject) => {
-      ffmpeg()
+      const command = ffmpeg()
         .input(concatPath)
         .inputOptions(['-f', 'concat', '-safe', '0'])
         .outputOptions([
-          // HEAVY COMPRESSION SETTINGS
+          // AGGRESSIVE COMPRESSION FOR SPEED
           '-c:v', 'libx264',
           '-c:a', 'aac',
-          '-preset', 'faster',
-          '-crf', '32',
-          '-vf', 'scale=640:-2', // Scale to 640p
-          '-r', '24', // 24fps
-          '-b:a', '96k', // Audio bitrate
-          '-movflags', '+faststart',
-          '-pix_fmt', 'yuv420p'
+          '-preset', 'ultrafast', // Fastest preset
+          '-crf', '35', // Higher compression
+          '-vf', 'scale=480:-2', // Smaller resolution
+          '-r', '20', // Lower framerate
+          '-b:a', '64k', // Lower audio bitrate
+          '-movflags', '+faststart'
         ])
         .output(outputPath)
-        .on('start', () => {
-          console.log('🚀 FFmpeg started with simple concat');
+        .on('start', (commandLine) => {
+          console.log('🚀 FFmpeg started (ultrafast preset)');
+          console.log('Command:', commandLine);
         })
         .on('progress', (progress) => {
           if (progress.percent) {
@@ -119,19 +127,26 @@ app.post('/api/sequence-videos', async (req, res) => {
           }
         })
         .on('end', () => {
-          console.log('✅ FFmpeg completed');
+          console.log('✅ FFmpeg completed successfully');
           resolve();
         })
         .on('error', (err) => {
           console.error('❌ FFmpeg error:', err.message);
           reject(new Error(`FFmpeg failed: ${err.message}`));
-        })
-        .run();
+        });
       
-      // 5 minute timeout
-      setTimeout(() => {
-        reject(new Error('Processing timeout'));
-      }, 300000);
+      // EXTENDED TIMEOUT - 10 minutes
+      const timeout = setTimeout(() => {
+        console.log('⏰ Timeout reached, killing FFmpeg...');
+        command.kill('SIGKILL');
+        reject(new Error('Processing timeout after 10 minutes'));
+      }, 600000); // 10 minutes
+      
+      command.on('end', () => {
+        clearTimeout(timeout);
+      });
+      
+      command.run();
     });
     
     // Read and return result
@@ -140,12 +155,18 @@ app.post('/api/sequence-videos', async (req, res) => {
     
     // Cleanup
     [...localFiles, concatPath, outputPath].forEach(file => {
-      try { fs.unlinkSync(file); } catch (e) {}
+      try { 
+        if (fs.existsSync(file)) {
+          fs.unlinkSync(file); 
+        }
+      } catch (e) {
+        console.warn('Cleanup warning:', e.message);
+      }
     });
     
     const totalTime = Date.now() - startTime;
     
-    console.log(`🎉 Success! Output: ${(outputBuffer.length / 1024).toFixed(2)} KB in ${totalTime}ms`);
+    console.log(`🎉 Success! Output: ${(outputBuffer.length / 1024).toFixed(2)} KB in ${(totalTime / 1000).toFixed(2)}s`);
     
     res.json({
       success: true,
@@ -153,9 +174,10 @@ app.post('/api/sequence-videos', async (req, res) => {
       videoData: `data:video/mp4;base64,${base64Video}`,
       size: outputBuffer.length,
       videosProcessed: localFiles.length,
+      videosRequested: timeline.length,
       compression: {
         outputSizeKB: (outputBuffer.length / 1024).toFixed(2),
-        settings: '640p, 24fps, CRF32'
+        settings: '480p, 20fps, CRF35, ultrafast'
       },
       processingTimeMs: totalTime
     });
@@ -172,5 +194,6 @@ app.post('/api/sequence-videos', async (req, res) => {
 // Start server
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Video Sequencer API v2.3.1 running on port ${PORT}`);
+  console.log(`🚀 Video Sequencer API v2.3.2 running on port ${PORT}`);
+  console.log(`⚡ Optimizations: 8 video limit, 10min timeout, ultrafast preset`);
 });
