@@ -187,15 +187,15 @@ app.post('/api/sequence-videos', async (req, res) => {
           
           const fallbackCommand = ffmpeg()
             .input(concatPath)
-            .inputOptions(['-f', 'concat', '-safe', '0'])
+            .inputOptions(['-f', 'concat', '-safe', '0'])            
             .outputOptions([
               '-c:v', 'libx264',
               '-c:a', 'aac',
-              '-preset', 'ultrafast', // Fastest encoding preset
-              '-crf', '30', // Lower quality for speed
-              '-movflags', '+faststart',
-              '-vf', 'scale=720:-2', // Reduce resolution for speed
-              '-r', '24' // Reduce frame rate
+              '-preset', 'ultrafast',
+              '-crf', '28', // Higher number = smaller file
+              '-vf', 'scale=720:-2', // Reduce resolution
+              '-r', '24', // Reduce frame rate
+              '-movflags', '+faststart'
             ])
             .output(outputPath)
             .on('end', () => {
