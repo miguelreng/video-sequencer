@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "api/sequence-videos.js": {
+      "maxDuration": 300
+    }
+  }
+}
