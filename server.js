@@ -16,57 +16,200 @@ app.use(express.json({ limit: '100mb' }));
 app.get('/', (req, res) => {
   res.json({ 
     status: 'Video Sequencer API is running!',
-    version: '2.6.1 - Simplified Audio Support',
+    version: '2.7.0 - Separate Video Sequencing & Audio Overlay',
     endpoints: {
-      sequence: 'POST /api/sequence-videos'
+      sequence: 'POST /api/sequence-videos (multiple videos → one video)',
+      audio: 'POST /api/add-audio (single video + audio → final video)'
     }
   });
 });
 
-// Main video sequencing endpoint with simplified audio
+// ENDPOINT 1: SEQUENCE MULTIPLE VIDEOS (Your original function)
 app.post('/api/sequence-videos', async (req, res) => {
   const startTime = Date.now();
-  console.log('🎬 Received video+audio request (simplified)');
+  console.log('🎬 Received video sequencing request (multiple videos → one)');
   
   try {
     const { videoUrls, tracks } = req.body;
     
-    let videoTrack = null;
-    let audioTrack = null;
+    let timeline = [];
     
-    // Parse tracks
     if (tracks && tracks.length > 0) {
-      tracks.forEach(track => {
-        if (track.type === 'video' && track.keyframes && track.keyframes.length > 0) {
-          videoTrack = track.keyframes[0]; // Take first video
-        } else if (track.type === 'audio' && track.keyframes && track.keyframes.length > 0) {
-          audioTrack = track.keyframes[0]; // Take first audio
-        }
-      });
+      // Find video track
+      const videoTrack = tracks.find(track => track.type === 'video');
+      if (videoTrack && videoTrack.keyframes) {
+        timeline = videoTrack.keyframes;
+      }
     } else if (videoUrls) {
-      // Legacy video-only support
-      videoTrack = {
-        url: videoUrls[0].mp4_url || videoUrls[0],
-        duration: 30 // Default duration
-      };
-    }
-    
-    if (!videoTrack) {
+      timeline = videoUrls.map((video, index) => ({
+        url: video.mp4_url || video,
+        timestamp: index * 5,
+        duration: 5
+      }));
+    } else {
       return res.status(400).json({
         success: false,
-        error: 'No video track found'
+        error: 'Either videoUrls array or tracks array is required'
       });
     }
     
-    console.log(`📹 Video: ${videoTrack.url}`);
-    if (audioTrack) {
-      console.log(`🎵 Audio: ${audioTrack.url}`);
+    // Limit to 6 videos for reliability
+    if (timeline.length > 6) {
+      console.log(`⚠️ Limiting from ${timeline.length} to 6 videos`);
+      timeline = timeline.slice(0, 6);
     }
+    
+    console.log(`📊 Sequencing ${timeline.length} video segments (5s each)`);
     
     const tempDir = '/tmp';
     if (!fs.existsSync(tempDir)) {
       fs.mkdirSync(tempDir, { recursive: true });
     }
+    
+    // Download and process videos
+    const processedFiles = [];
+    for (let i = 0; i < timeline.length; i++) {
+      const segment = timeline[i];
+      try {
+        console.log(`📥 Downloading segment ${i + 1}: ${segment.url}`);
+        
+        const response = await fetch(segment.url, { timeout: 15000 });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        
+        const buffer = await response.buffer();
+        const originalPath = path.join(tempDir, `original${i}.mp4`);
+        const processedPath = path.join(tempDir, `processed${i}.mp4`);
+        
+        fs.writeFileSync(originalPath, buffer);
+        console.log(`✅ Downloaded segment ${i + 1}`);
+        
+        // Process each video to 5 seconds
+        await new Promise((resolve, reject) => {
+          ffmpeg(originalPath)
+            .inputOptions(['-ss', '0'])
+            .outputOptions([
+              '-t', '5', // Exactly 5 seconds
+              '-c:v', 'libx264',
+              '-c:a', 'aac',
+              '-preset', 'fast',
+              '-crf', '25',
+              '-vf', 'scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280',
+              '-r', '24'
+            ])
+            .output(processedPath)
+            .on('end', () => {
+              console.log(`✅ Processed segment ${i + 1}`);
+              resolve();
+            })
+            .on('error', reject)
+            .run();
+        });
+        
+        processedFiles.push(processedPath);
+        fs.unlinkSync(originalPath);
+        
+      } catch (error) {
+        console.error(`❌ Failed segment ${i + 1}:`, error.message);
+      }
+    }
+    
+    if (processedFiles.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'No videos processed successfully'
+      });
+    }
+    
+    // Concatenate all segments
+    console.log(`🔗 Concatenating ${processedFiles.length} segments...`);
+    
+    const concatContent = processedFiles.map(file => `file '${file}'`).join('\n');
+    const concatPath = path.join(tempDir, 'concat.txt');
+    fs.writeFileSync(concatPath, concatContent);
+    
+    const outputPath = path.join(tempDir, `sequenced_${Date.now()}.mp4`);
+    
+    await new Promise((resolve, reject) => {
+      ffmpeg()
+        .input(concatPath)
+        .inputOptions(['-f', 'concat', '-safe', '0'])
+        .outputOptions(['-c', 'copy', '-movflags', '+faststart'])
+        .output(outputPath)
+        .on('end', resolve)
+        .on('error', reject)
+        .run();
+    });
+    
+    // Read result
+    const outputBuffer = fs.readFileSync(outputPath);
+    const base64Video = outputBuffer.toString('base64');
+    
+    // Cleanup
+    [...processedFiles, concatPath, outputPath].forEach(file => {
+      try { fs.unlinkSync(file); } catch (e) {}
+    });
+    
+    const totalTime = Date.now() - startTime;
+    const totalDuration = processedFiles.length * 5;
+    
+    console.log(`🎉 Sequenced ${processedFiles.length} videos = ${totalDuration} seconds total`);
+    
+    res.json({
+      success: true,
+      message: `Successfully sequenced ${processedFiles.length} videos into ${totalDuration} seconds`,
+      videoData: `data:video/mp4;base64,${base64Video}`,
+      size: outputBuffer.length,
+      videosProcessed: processedFiles.length,
+      totalDuration: `${totalDuration} seconds`,
+      processingTimeMs: totalTime
+    });
+    
+  } catch (error) {
+    console.error('💥 Sequencing error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// ENDPOINT 2: ADD AUDIO TO SINGLE VIDEO
+app.post('/api/add-audio', async (req, res) => {
+  const startTime = Date.now();
+  console.log('🎵 Received audio overlay request (video + audio → final)');
+  
+  try {
+    const { tracks } = req.body;
+    
+    if (!tracks || tracks.length < 2) {
+      return res.status(400).json({
+        success: false,
+        error: 'Both video and audio tracks are required'
+      });
+    }
+    
+    let videoTrack = null;
+    let audioTrack = null;
+    
+    tracks.forEach(track => {
+      if (track.type === 'video' && track.keyframes && track.keyframes.length > 0) {
+        videoTrack = track.keyframes[0];
+      } else if (track.type === 'audio' && track.keyframes && track.keyframes.length > 0) {
+        audioTrack = track.keyframes[0];
+      }
+    });
+    
+    if (!videoTrack || !audioTrack) {
+      return res.status(400).json({
+        success: false,
+        error: 'Both video and audio keyframes are required'
+      });
+    }
+    
+    console.log(`📹 Video: ${videoTrack.url}, Duration: ${videoTrack.duration}s`);
+    console.log(`🎵 Audio: ${audioTrack.url}, Duration: ${audioTrack.duration}s`);
+    
+    const tempDir = '/tmp';
     
     // Download video
     console.log('📥 Downloading video...');
@@ -76,121 +219,49 @@ app.post('/api/sequence-videos', async (req, res) => {
     }
     
     const videoBuffer = await videoResponse.buffer();
-    const videoInputPath = path.join(tempDir, 'input_video.mp4');
-    fs.writeFileSync(videoInputPath, videoBuffer);
+    const videoPath = path.join(tempDir, 'input_video.mp4');
+    fs.writeFileSync(videoPath, videoBuffer);
     
-    console.log(`✅ Video downloaded: ${(videoBuffer.length / 1024).toFixed(2)} KB`);
-    
-    let audioInputPath = null;
-    
-    // Download audio if provided
-    if (audioTrack) {
-      console.log('📥 Downloading audio...');
-      const audioResponse = await fetch(audioTrack.url, { timeout: 30000 });
-      if (!audioResponse.ok) {
-        console.warn(`Audio download failed: ${audioResponse.status}, proceeding without audio`);
-      } else {
-        const audioBuffer = await audioResponse.buffer();
-        audioInputPath = path.join(tempDir, 'input_audio.mp3');
-        fs.writeFileSync(audioInputPath, audioBuffer);
-        console.log(`✅ Audio downloaded: ${(audioBuffer.length / 1024).toFixed(2)} KB`);
-      }
+    // Download audio
+    console.log('📥 Downloading audio...');
+    const audioResponse = await fetch(audioTrack.url, { timeout: 30000 });
+    if (!audioResponse.ok) {
+      throw new Error(`Audio download failed: ${audioResponse.status}`);
     }
     
-    const outputPath = path.join(tempDir, `output_${Date.now()}.mp4`);
+    const audioBuffer = await audioResponse.buffer();
+    const audioPath = path.join(tempDir, 'input_audio.mp3');
+    fs.writeFileSync(audioBuffer, audioPath);
     
-    // Process video with or without audio
+    // Combine video + audio
+    const outputPath = path.join(tempDir, `final_${Date.now()}.mp4`);
+    const duration = Math.min(videoTrack.duration, audioTrack.duration);
+    
+    console.log(`🔄 Combining video + audio (${duration}s)...`);
+    
     await new Promise((resolve, reject) => {
-      let command = ffmpeg(videoInputPath);
-      
-      // Add audio input if available
-      if (audioInputPath) {
-        command = command.input(audioInputPath);
-      }
-      
-      // Set duration
-      const duration = Math.min(
-        videoTrack.duration || 30,
-        audioTrack ? audioTrack.duration || 30 : 30
-      );
-      
-      command
-        .inputOptions(['-ss', '0']) // Start from beginning
+      ffmpeg(videoPath)
+        .input(audioPath)
         .outputOptions([
-          '-t', duration.toString(), // Set duration
-          '-c:v', 'libx264',
-          '-preset', 'fast',
-          '-crf', '25',
-          
-          // Simple video filter - no complex operations
-          '-vf', 'scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280',
-          
-          '-r', '24',
-          '-movflags', '+faststart'
-        ]);
-      
-      // Audio handling
-      if (audioInputPath) {
-        command.outputOptions([
-          '-c:a', 'aac',
-          '-b:a', '128k',
+          '-t', duration.toString(),
+          '-c:v', 'copy', // Copy video (no re-encoding)
+          '-c:a', 'aac',  // Re-encode audio
           '-map', '0:v:0', // Video from first input
           '-map', '1:a:0', // Audio from second input
-          '-shortest' // Stop when shortest stream ends
-        ]);
-      } else {
-        // Video only - copy existing audio if any
-        command.outputOptions([
-          '-c:a', 'aac'
-        ]);
-      }
-      
-      command
+          '-shortest',
+          '-movflags', '+faststart'
+        ])
         .output(outputPath)
-        .on('start', (commandLine) => {
-          console.log('🚀 FFmpeg started (simplified)');
-          console.log('Command:', commandLine);
-        })
-        .on('progress', (progress) => {
-          if (progress.percent) {
-            console.log(`⚡ Progress: ${Math.round(progress.percent)}%`);
-          }
+        .on('start', () => {
+          console.log('🚀 FFmpeg combining video + audio...');
         })
         .on('end', () => {
-          console.log('✅ Processing completed');
+          console.log('✅ Video + audio combination completed');
           resolve();
         })
         .on('error', (err) => {
-          console.error('❌ FFmpeg error:', err.message);
-          
-          // FALLBACK: Video only, no audio
-          if (audioInputPath) {
-            console.log('🔄 Retrying without audio...');
-            
-            ffmpeg(videoInputPath)
-              .inputOptions(['-ss', '0'])
-              .outputOptions([
-                '-t', (videoTrack.duration || 30).toString(),
-                '-c:v', 'libx264',
-                '-preset', 'ultrafast',
-                '-crf', '28',
-                '-vf', 'scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280',
-                '-r', '24',
-                '-an' // No audio
-              ])
-              .output(outputPath)
-              .on('end', () => {
-                console.log('✅ Fallback completed (video only)');
-                resolve();
-              })
-              .on('error', (fallbackErr) => {
-                console.error('❌ Fallback failed:', fallbackErr.message);
-                reject(fallbackErr);
-              })
-              .run();
-          } else {
-            reject(err);
-          }
+          console.error('❌ Combination error:', err.message);
+          reject(err);
         })
         .run();
     });
@@ -200,31 +271,26 @@ app.post('/api/sequence-videos', async (req, res) => {
     const base64Video = outputBuffer.toString('base64');
     
     // Cleanup
-    [videoInputPath, audioInputPath, outputPath].forEach(file => {
-      try { 
-        if (file && fs.existsSync(file)) {
-          fs.unlinkSync(file); 
-        }
-      } catch (e) {}
+    [videoPath, audioPath, outputPath].forEach(file => {
+      try { fs.unlinkSync(file); } catch (e) {}
     });
     
     const totalTime = Date.now() - startTime;
     
-    console.log(`🎉 Success! ${audioTrack ? 'Video+Audio' : 'Video'} processed`);
-    console.log(`📦 Output size: ${(outputBuffer.length / 1024).toFixed(2)} KB`);
+    console.log(`🎉 Final video with audio created (${duration}s)`);
     
     res.json({
       success: true,
-      message: `Successfully processed video${audioTrack ? ' with audio' : ''}`,
+      message: `Successfully added audio to video (${duration} seconds)`,
       videoData: `data:video/mp4;base64,${base64Video}`,
       size: outputBuffer.length,
-      hasAudio: !!audioTrack,
-      duration: videoTrack.duration || 30,
+      duration: `${duration} seconds`,
+      hasAudio: true,
       processingTimeMs: totalTime
     });
     
   } catch (error) {
-    console.error('💥 Error:', error.message);
+    console.error('💥 Audio overlay error:', error.message);
     res.status(500).json({
       success: false,
       error: error.message
@@ -235,6 +301,7 @@ app.post('/api/sequence-videos', async (req, res) => {
 // Start server
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Video Sequencer API v2.6.1 running on port ${PORT}`);
-  console.log(`🎵 Features: Simplified video+audio processing with fallbacks`);
+  console.log(`🚀 Video Sequencer API v2.7.0 running on port ${PORT}`);
+  console.log(`📹 /api/sequence-videos - Multiple videos → One video`);
+  console.log(`🎵 /api/add-audio - Single video + audio → Final video`);
 });
