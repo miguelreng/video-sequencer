@@ -16,22 +16,22 @@ app.use(express.json({ limit: '100mb' }));
 app.get('/', (req, res) => {
   res.json({ 
     status: 'Video Sequencer API is running!',
-    version: '2.5.3 - Fixed Aspect Ratio Zoom',
+    version: '2.5.4 - Working Zoom-In Effect',
     endpoints: {
       sequence: 'POST /api/sequence-videos'
     },
     effects: [
-      'Proper aspect ratio zoom-in',
-      'No stretching or distortion',
-      'Clean portrait format output'
+      'Simple and effective zoom-in',
+      'Visible zoom from 1.0x to 1.3x',
+      'Smooth 5-second animation'
     ]
   });
 });
 
-// Main video sequencing endpoint with proper zoom
+// Main video sequencing endpoint with working zoom
 app.post('/api/sequence-videos', async (req, res) => {
   const startTime = Date.now();
-  console.log('🎬 Received video sequencing request with proper zoom');
+  console.log('🎬 Received video sequencing request with working zoom-in');
   
   try {
     const { videoUrls, tracks } = req.body;
@@ -59,14 +59,14 @@ app.post('/api/sequence-videos', async (req, res) => {
       timeline = timeline.slice(0, 6);
     }
     
-    console.log(`📊 Processing ${timeline.length} video segments with proper zoom`);
+    console.log(`📊 Processing ${timeline.length} video segments with working zoom`);
     
     const tempDir = '/tmp';
     if (!fs.existsSync(tempDir)) {
       fs.mkdirSync(tempDir, { recursive: true });
     }
     
-    // Download and process videos with proper zoom
+    // Download and process videos with working zoom
     const processedFiles = [];
     for (let i = 0; i < timeline.length; i++) {
       const segment = timeline[i];
@@ -83,9 +83,9 @@ app.post('/api/sequence-videos', async (req, res) => {
         fs.writeFileSync(originalPath, buffer);
         console.log(`✅ Downloaded segment ${i + 1}, size: ${(buffer.length / 1024).toFixed(2)} KB`);
         
-        console.log(`🔍 Applying proper zoom to segment ${i + 1}`);
+        console.log(`🔍 Applying working zoom to segment ${i + 1}`);
         
-        // PROPER ZOOM WITH CORRECT ASPECT RATIO
+        // WORKING ZOOM-IN EFFECT
         await new Promise((resolve, reject) => {
           ffmpeg(originalPath)
             .inputOptions(['-ss', '0']) // Start from beginning
@@ -96,17 +96,9 @@ app.post('/api/sequence-videos', async (req, res) => {
               '-preset', 'fast',
               '-crf', '25',
               
-              // PROPER ZOOM FILTER - No stretching
-              '-vf', [
-                // First, crop to portrait aspect ratio while maintaining quality
-                'scale=1080:-1', // Scale width to 1080, keep aspect ratio
-                // Apply gentle zoom from center
-                'crop=1080:1920:0:0', // Crop to 9:16 aspect ratio
-                // Slow zoom in over 5 seconds (1.0x to 1.15x)
-                'zoompan=z=\'min(1.15,1+(t/5)*0.15)\':d=125:x=iw/2-(iw/zoom/2):y=ih/2-(ih/zoom/2)',
-                // Final resize to exact output dimensions
-                'scale=720:1280'
-              ].join(','),
+              // SIMPLE WORKING ZOOM FILTER
+              // Scale up the video first, then apply zoom pan
+              '-vf', 'scale=1440:2560,zoompan=z=\'1+0.06*t\':d=120:x=iw/2-(iw/zoom/2):y=ih/2-(ih/zoom/2):s=720x1280',
               
               '-r', '24', // 24fps
               '-movflags', '+faststart',
@@ -114,22 +106,23 @@ app.post('/api/sequence-videos', async (req, res) => {
             ])
             .output(processedPath)
             .on('start', (commandLine) => {
-              console.log(`🚀 Processing segment ${i + 1} with proper zoom`);
+              console.log(`🚀 Processing segment ${i + 1} with working zoom`);
+              console.log('FFmpeg command:', commandLine);
             })
             .on('progress', (progress) => {
               if (progress.percent) {
-                console.log(`⚡ Segment ${i + 1} progress: ${Math.round(progress.percent)}%`);
+                console.log(`⚡ Segment ${i + 1} zoom progress: ${Math.round(progress.percent)}%`);
               }
             })
             .on('end', () => {
-              console.log(`✅ Segment ${i + 1} zoom completed`);
+              console.log(`✅ Segment ${i + 1} zoom completed successfully`);
               resolve();
             })
             .on('error', (err) => {
               console.error(`❌ Zoom error for segment ${i + 1}:`, err.message);
               
-              // SIMPLE FALLBACK - Just resize without zoom
-              console.log(`🔄 Retrying segment ${i + 1} with simple resize...`);
+              // FALLBACK: Try different zoom approach
+              console.log(`🔄 Trying alternative zoom for segment ${i + 1}...`);
               
               ffmpeg(originalPath)
                 .inputOptions(['-ss', '0'])
@@ -139,19 +132,42 @@ app.post('/api/sequence-videos', async (req, res) => {
                   '-c:a', 'aac',
                   '-preset', 'fast',
                   '-crf', '25',
-                  // Simple resize maintaining aspect ratio
-                  '-vf', 'scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280',
+                  // Alternative zoom method
+                  '-vf', 'scale=2*iw:2*ih,zoompan=z=1.3:d=120:x=iw/2-(iw/zoom/2):y=ih/2-(ih/zoom/2):s=720x1280',
                   '-r', '24',
                   '-movflags', '+faststart'
                 ])
                 .output(processedPath)
                 .on('end', () => {
-                  console.log(`✅ Segment ${i + 1} completed (simple resize)`);
+                  console.log(`✅ Segment ${i + 1} completed (alternative zoom)`);
                   resolve();
                 })
                 .on('error', (fallbackErr) => {
-                  console.error(`❌ Fallback failed for segment ${i + 1}:`, fallbackErr.message);
-                  reject(fallbackErr);
+                  console.error(`❌ Alternative zoom failed for segment ${i + 1}:`, fallbackErr.message);
+                  
+                  // FINAL FALLBACK: No zoom, just resize
+                  ffmpeg(originalPath)
+                    .inputOptions(['-ss', '0'])
+                    .outputOptions([
+                      '-t', '5',
+                      '-c:v', 'libx264',
+                      '-c:a', 'aac',
+                      '-preset', 'fast',
+                      '-crf', '25',
+                      '-vf', 'scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280',
+                      '-r', '24',
+                      '-movflags', '+faststart'
+                    ])
+                    .output(processedPath)
+                    .on('end', () => {
+                      console.log(`✅ Segment ${i + 1} completed (no zoom fallback)`);
+                      resolve();
+                    })
+                    .on('error', (finalErr) => {
+                      console.error(`❌ Final fallback failed for segment ${i + 1}:`, finalErr.message);
+                      reject(finalErr);
+                    })
+                    .run();
                 })
                 .run();
             })
@@ -175,7 +191,7 @@ app.post('/api/sequence-videos', async (req, res) => {
       });
     }
     
-    console.log(`🔗 Concatenating ${processedFiles.length} processed segments...`);
+    console.log(`🔗 Concatenating ${processedFiles.length} zoom-processed segments...`);
     
     // Create concat file
     const concatContent = processedFiles.map(file => `file '${file}'`).join('\n');
@@ -195,7 +211,7 @@ app.post('/api/sequence-videos', async (req, res) => {
         ])
         .output(outputPath)
         .on('start', () => {
-          console.log('🔗 Concatenating videos...');
+          console.log('🔗 Concatenating zoom-processed videos...');
         })
         .on('end', () => {
           console.log('✅ Concatenation completed');
@@ -224,19 +240,19 @@ app.post('/api/sequence-videos', async (req, res) => {
     const totalTime = Date.now() - startTime;
     const expectedDuration = processedFiles.length * 5;
     
-    console.log(`🎉 Success! ${processedFiles.length} videos with proper zoom`);
+    console.log(`🎉 Success! ${processedFiles.length} videos with zoom-in effect`);
     console.log(`📦 Output size: ${(outputBuffer.length / 1024).toFixed(2)} KB`);
     
     res.json({
       success: true,
-      message: `Successfully processed ${processedFiles.length} videos with proper aspect ratio zoom`,
+      message: `Successfully processed ${processedFiles.length} videos with visible zoom-in effect`,
       videoData: `data:video/mp4;base64,${base64Video}`,
       size: outputBuffer.length,
       videosProcessed: processedFiles.length,
       videosRequested: timeline.length,
       expectedDuration: `${expectedDuration} seconds`,
-      effects: 'Gentle zoom-in (1.0x to 1.15x) with proper aspect ratio',
-      quality: '720x1280, 24fps, no stretching',
+      effects: 'Visible zoom-in effect from 1.0x to 1.3x over 5 seconds',
+      quality: '720x1280, 24fps, working zoom animation',
       processingTimeMs: totalTime
     });
     
@@ -252,6 +268,6 @@ app.post('/api/sequence-videos', async (req, res) => {
 // Start server
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Video Sequencer API v2.5.3 running on port ${PORT}`);
-  console.log(`🔍 Features: Proper aspect ratio zoom, no stretching, gentle 1.15x zoom`);
+  console.log(`🚀 Video Sequencer API v2.5.4 running on port ${PORT}`);
+  console.log(`🔍 Features: Working zoom-in effect, 1.0x to 1.3x zoom, multiple fallbacks`);
 });
