@@ -336,13 +336,11 @@ app.post('/api/add-subtitles', async (req, res) => {
     
     // Build drawtext filters for each subtitle with maximum visibility
     const textFilters = subtitles.map((subtitle, index) => {
-      // Clean text thoroughly
+      // Clean text thoroughly and safely
       const cleanText = subtitle.text
-        .replace(/'/g, '') // Remove single quotes
-        .replace(/"/g, '') // Remove double quotes  
-        .replace(/[\\]/g, '') // Remove backslashes
-        .replace(/[:]/g, '') // Remove colons
-        .replace(/[^\w\s\u00C0-\u017F¡¿ñÑ]/g, ''); // Keep only letters, spaces, and Spanish chars
+        .replace(/['"\\:]/g, '') // Remove quotes, backslashes, colons
+        .replace(/[^\w\s]/g, '') // Keep only alphanumeric and spaces
+        .trim();
       
       console.log(`🎨 [SUBTITLES] Filter ${index + 1}: "${cleanText}" at ${subtitle.start}-${subtitle.end}s`);
       
@@ -351,24 +349,22 @@ app.post('/api/add-subtitles', async (req, res) => {
     
     const videoFilter = textFilters.join(',');
     console.log(`🔧 [SUBTITLES] Combined filter length: ${videoFilter.length} chars`);
-    console.log(`🔧 [SUBTITLES] Filter preview: ${videoFilter.substring(0, 200)}...`);
     
     console.log('🔄 [SUBTITLES] Rendering subtitles with DRAWTEXT...');
     
     await new Promise((resolve, reject) => {
-      ffmpeg(inputPath)
+      const command = ffmpeg(inputPath)
         .outputOptions([
           '-c:v', 'libx264',
           '-c:a', 'copy',
           '-preset', 'fast',
           '-crf', '25',
-          '-vf', videoFilter,
-          '-movflags', '+faststart',
-          '-y'
+          '-movflags', '+faststart'
         ])
+        .videoFilters(videoFilter) // Use videoFilters method instead of -vf
         .output(outputPath)
         .on('start', (commandLine) => {
-          console.log('🚀 [SUBTITLES] FFmpeg DRAWTEXT command:', commandLine);
+          console.log('🚀 [SUBTITLES] FFmpeg DRAWTEXT command started');
         })
         .on('progress', (progress) => {
           if (progress.percent) {
@@ -382,11 +378,13 @@ app.post('/api/add-subtitles', async (req, res) => {
         .on('error', (err) => {
           console.error('❌ [SUBTITLES] DRAWTEXT failed:', err.message);
           
-          // ULTIMATE FALLBACK: Single subtitle test
-          console.log('🔄 [SUBTITLES] ULTIMATE FALLBACK: single bright subtitle...');
+          // SIMPLE FALLBACK: Process only first subtitle
+          console.log('🔄 [SUBTITLES] SIMPLE FALLBACK: first subtitle only...');
           
-          const testSub = subtitles[0];
-          const ultraCleanText = testSub.text.replace(/[^\w\s]/g, '').substring(0, 20);
+          const firstSub = subtitles[0];
+          const simpleText = firstSub.text.replace(/[^\w\s]/g, '').substring(0, 15);
+          
+          const fallbackPath = path.join(tempDir, 'fallback.mp4');
           
           ffmpeg(inputPath)
             .outputOptions([
@@ -394,23 +392,28 @@ app.post('/api/add-subtitles', async (req, res) => {
               '-c:a', 'copy',
               '-preset', 'ultrafast',
               '-crf', '30',
-              '-vf', `drawtext=text='${ultraCleanText}':fontsize=48:fontcolor=red:borderw=6:bordercolor=white:x=(w-text_w)/2:y=(h-text_h)/2`,
-              '-t', '10',
-              '-y'
+              '-t', '15' // Limit duration
             ])
-            .output(outputPath)
+            .videoFilters(`drawtext=text='${simpleText}':fontsize=40:fontcolor=yellow:x=(w-text_w)/2:y=h-120`)
+            .output(fallbackPath)
             .on('end', () => {
-              console.log('✅ [SUBTITLES] ULTIMATE FALLBACK completed (bright red text in center)');
+              console.log('✅ [SUBTITLES] Simple fallback completed');
+              // Copy fallback to output
+              fs.copyFileSync(fallbackPath, outputPath);
+              fs.unlinkSync(fallbackPath);
               resolve();
             })
-            .on('error', (finalErr) => {
-              console.error('❌ [SUBTITLES] Even ultimate fallback failed:', finalErr.message);
+            .on('error', (fallbackErr) => {
+              console.error('❌ [SUBTITLES] Fallback failed:', fallbackErr.message);
+              // Final resort: copy original
               fs.copyFileSync(inputPath, outputPath);
+              console.log('⚠️ [SUBTITLES] Copied original video (no subtitles)');
               resolve();
             })
             .run();
-        })
-        .run();
+        });
+      
+      command.run();
     });
     
     const outputBuffer = fs.readFileSync(outputPath);
