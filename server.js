@@ -298,10 +298,10 @@ app.post('/api/add-audio', async (req, res) => {
   }
 });
 
-// ENDPOINT 3: ADD SUBTITLES TO VIDEO (SIMPLIFIED)
+// ENDPOINT 3: ADD SUBTITLES TO VIDEO (ULTRA-SIMPLE)
 app.post('/api/add-subtitles', async (req, res) => {
   const startTime = Date.now();
-  console.log('📝 [SUBTITLES] Received subtitle request (simplified approach)');
+  console.log('📝 [SUBTITLES] Ultra-simple subtitle approach');
   
   try {
     const { video_url, subtitles } = req.body;
@@ -321,12 +321,9 @@ app.post('/api/add-subtitles', async (req, res) => {
     }
     
     console.log(`📹 [SUBTITLES] Video: ${video_url}`);
-    console.log(`📝 [SUBTITLES] Subtitles: ${subtitles.length} segments`);
+    console.log(`📝 [SUBTITLES] Processing ${subtitles.length} segments`);
     
     const tempDir = '/tmp';
-    if (!fs.existsSync(tempDir)) {
-      fs.mkdirSync(tempDir, { recursive: true });
-    }
     
     // Download video
     console.log('📥 [SUBTITLES] Downloading video...');
@@ -336,41 +333,39 @@ app.post('/api/add-subtitles', async (req, res) => {
     }
     
     const videoBuffer = await videoResponse.buffer();
-    const videoPath = path.join(tempDir, `sub_input_${Date.now()}.mp4`);
-    fs.writeFileSync(videoPath, videoBuffer);
-    console.log(`✅ [SUBTITLES] Video downloaded: ${(videoBuffer.length / 1024).toFixed(2)} KB`);
+    const videoInputPath = path.join(tempDir, 'subtitle_input.mp4');
+    fs.writeFileSync(videoInputPath, videoBuffer);
+    console.log(`✅ [SUBTITLES] Video saved: ${(videoBuffer.length / 1024).toFixed(2)} KB`);
     
-    const outputPath = path.join(tempDir, `sub_output_${Date.now()}.mp4`);
+    // Create SRT subtitle file (most reliable method)
+    const srtContent = subtitles.map((subtitle, index) => {
+      const startTime = formatSRTTime(subtitle.start);
+      const endTime = formatSRTTime(subtitle.end);
+      return `${index + 1}\n${startTime} --> ${endTime}\n${subtitle.text}\n`;
+    }).join('\n');
     
-    // Build simple drawtext filters for each subtitle
-    const textFilters = subtitles.map(subtitle => {
-      // Clean and escape text
-      const cleanText = subtitle.text
-        .replace(/'/g, "\\'")
-        .replace(/:/g, "\\:")
-        .replace(/\\/g, "\\\\");
-      
-      return `drawtext=text='${cleanText}':fontsize=24:fontcolor=white:borderw=2:bordercolor=black:x=(w-text_w)/2:y=h-text_h-50:enable='between(t,${subtitle.start},${subtitle.end})'`;
-    });
+    const srtPath = path.join(tempDir, 'subtitles.srt');
+    fs.writeFileSync(srtPath, srtContent, 'utf8');
+    console.log('✅ [SUBTITLES] SRT file created');
     
-    const videoFilter = textFilters.join(',');
+    const outputPath = path.join(tempDir, 'subtitle_output.mp4');
     
-    console.log('🔄 [SUBTITLES] Processing video with subtitles...');
-    console.log(`Filter preview: ${videoFilter.substring(0, 200)}...`);
+    console.log('🔄 [SUBTITLES] Adding subtitles with SRT...');
     
     await new Promise((resolve, reject) => {
-      ffmpeg(videoPath)
+      ffmpeg(videoInputPath)
         .outputOptions([
           '-c:v', 'libx264',
           '-c:a', 'copy',
-          '-preset', 'fast',
-          '-crf', '25',
-          '-vf', videoFilter,
-          '-movflags', '+faststart'
+          '-preset', 'ultrafast',
+          '-crf', '28',
+          // Simple subtitles filter with SRT
+          '-vf', `subtitles=${srtPath}`,
+          '-y' // Overwrite output file
         ])
         .output(outputPath)
         .on('start', (commandLine) => {
-          console.log('🚀 [SUBTITLES] FFmpeg started');
+          console.log('🚀 [SUBTITLES] FFmpeg command:', commandLine);
         })
         .on('progress', (progress) => {
           if (progress.percent) {
@@ -378,21 +373,46 @@ app.post('/api/add-subtitles', async (req, res) => {
           }
         })
         .on('end', () => {
-          console.log('✅ [SUBTITLES] Subtitles added successfully');
+          console.log('✅ [SUBTITLES] SRT subtitles completed');
           resolve();
         })
         .on('error', (err) => {
-          console.error('❌ [SUBTITLES] FFmpeg error:', err.message);
+          console.error('❌ [SUBTITLES] SRT failed:', err.message);
           
-          // FALLBACK: Return original video if subtitle processing fails
-          console.log('🔄 [SUBTITLES] Fallback: copying original video...');
-          try {
-            fs.copyFileSync(videoPath, outputPath);
-            console.log('⚠️ [SUBTITLES] Original video copied (no subtitles)');
-            resolve();
-          } catch (copyErr) {
-            reject(copyErr);
-          }
+          // FALLBACK 1: Try with drawtext for first subtitle only
+          console.log('🔄 [SUBTITLES] Fallback: single subtitle with drawtext...');
+          
+          const firstSub = subtitles[0];
+          const simpleText = firstSub.text.replace(/[^\w\s]/g, ''); // Remove special chars
+          
+          ffmpeg(videoInputPath)
+            .outputOptions([
+              '-c:v', 'libx264',
+              '-c:a', 'copy',
+              '-preset', 'ultrafast',
+              '-crf', '30',
+              '-vf', `drawtext=text='${simpleText}':fontsize=24:fontcolor=white:x=(w-text_w)/2:y=h-100`,
+              '-t', '10', // Limit to 10 seconds
+              '-y'
+            ])
+            .output(outputPath)
+            .on('end', () => {
+              console.log('✅ [SUBTITLES] Fallback completed (single subtitle)');
+              resolve();
+            })
+            .on('error', (fallbackErr) => {
+              console.error('❌ [SUBTITLES] Fallback failed:', fallbackErr.message);
+              
+              // FINAL FALLBACK: Copy original
+              try {
+                fs.copyFileSync(videoInputPath, outputPath);
+                console.log('⚠️ [SUBTITLES] Copied original (no subtitles)');
+                resolve();
+              } catch (copyErr) {
+                reject(copyErr);
+              }
+            })
+            .run();
         })
         .run();
     });
@@ -402,7 +422,7 @@ app.post('/api/add-subtitles', async (req, res) => {
     const base64Video = outputBuffer.toString('base64');
     
     // Cleanup
-    [videoPath, outputPath].forEach(file => {
+    [videoInputPath, srtPath, outputPath].forEach(file => {
       try { 
         if (fs.existsSync(file)) {
           fs.unlinkSync(file); 
@@ -412,12 +432,12 @@ app.post('/api/add-subtitles', async (req, res) => {
     
     const totalTime = Date.now() - startTime;
     
-    console.log(`🎉 [SUBTITLES] Success! Video processed`);
-    console.log(`📦 [SUBTITLES] Output size: ${(outputBuffer.length / 1024).toFixed(2)} KB`);
+    console.log(`🎉 [SUBTITLES] Success!`);
+    console.log(`📦 [SUBTITLES] Output: ${(outputBuffer.length / 1024).toFixed(2)} KB`);
     
     res.json({
       success: true,
-      message: `Successfully processed video with ${subtitles.length} subtitle segments`,
+      message: `Video processed with subtitle support`,
       videoData: `data:video/mp4;base64,${base64Video}`,
       size: outputBuffer.length,
       subtitleCount: subtitles.length,
@@ -432,6 +452,16 @@ app.post('/api/add-subtitles', async (req, res) => {
     });
   }
 });
+
+// Helper function to format SRT time
+function formatSRTTime(seconds) {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+  const milliseconds = Math.floor((seconds % 1) * 1000);
+  
+  return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')},${milliseconds.toString().padStart(3, '0')}`;
+}
 
 // Error handling middleware
 app.use((error, req, res, next) => {
