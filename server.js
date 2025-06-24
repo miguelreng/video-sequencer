@@ -16,14 +16,14 @@ app.use(express.json({ limit: '100mb' }));
 app.get('/', (req, res) => {
   res.json({ 
     status: 'Video Sequencer API is running!',
-    version: '2.3.2 - Extended Timeout & Limits',
+    version: '2.4.0 - Proper 5-Second Trimming',
     endpoints: {
       sequence: 'POST /api/sequence-videos'
     }
   });
 });
 
-// Main video sequencing endpoint
+// Main video sequencing endpoint with proper trimming
 app.post('/api/sequence-videos', async (req, res) => {
   const startTime = Date.now();
   console.log('🎬 Received video sequencing request');
@@ -48,137 +48,155 @@ app.post('/api/sequence-videos', async (req, res) => {
       });
     }
     
-    // LIMIT TO 8 VIDEOS FOR RELIABILITY
+    // Limit to 8 videos for performance
     if (timeline.length > 8) {
-      console.log(`⚠️ Limiting from ${timeline.length} to 8 videos for performance`);
+      console.log(`⚠️ Limiting from ${timeline.length} to 8 videos`);
       timeline = timeline.slice(0, 8);
     }
     
-    console.log(`📊 Processing ${timeline.length} video segments`);
+    console.log(`📊 Processing ${timeline.length} video segments (5s each)`);
     
     const tempDir = '/tmp';
     if (!fs.existsSync(tempDir)) {
       fs.mkdirSync(tempDir, { recursive: true });
     }
     
-    // Download videos
-    const localFiles = [];
+    // Download and trim videos to exactly 5 seconds each
+    const trimmedFiles = [];
     for (let i = 0; i < timeline.length; i++) {
       const segment = timeline[i];
       try {
-        console.log(`📥 Downloading segment ${i + 1}`);
+        console.log(`📥 Downloading segment ${i + 1}: ${segment.url}`);
         
-        const response = await fetch(segment.url, { timeout: 15000 }); // Reduced timeout
+        const response = await fetch(segment.url, { timeout: 15000 });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         
         const buffer = await response.buffer();
-        const filePath = path.join(tempDir, `segment${i}.mp4`);
-        fs.writeFileSync(filePath, buffer);
+        const originalPath = path.join(tempDir, `original${i}.mp4`);
+        const trimmedPath = path.join(tempDir, `trimmed${i}.mp4`);
         
-        localFiles.push(filePath);
+        fs.writeFileSync(originalPath, buffer);
         console.log(`✅ Downloaded segment ${i + 1}, size: ${(buffer.length / 1024).toFixed(2)} KB`);
+        
+        // TRIM VIDEO TO EXACTLY 5 SECONDS
+        console.log(`✂️ Trimming segment ${i + 1} to 5 seconds...`);
+        
+        await new Promise((resolve, reject) => {
+          ffmpeg(originalPath)
+            .inputOptions(['-ss', '0']) // Start from beginning
+            .outputOptions([
+              '-t', '5', // Duration: exactly 5 seconds
+              '-c:v', 'libx264',
+              '-c:a', 'aac',
+              '-preset', 'fast',
+              '-crf', '28', // Good quality
+              '-vf', 'scale=720:-2', // 720p for good quality
+              '-r', '24', // 24fps
+              '-movflags', '+faststart'
+            ])
+            .output(trimmedPath)
+            .on('start', () => {
+              console.log(`🚀 Trimming segment ${i + 1} to 5 seconds`);
+            })
+            .on('end', () => {
+              console.log(`✅ Trimmed segment ${i + 1} completed`);
+              resolve();
+            })
+            .on('error', (err) => {
+              console.error(`❌ Trim error for segment ${i + 1}:`, err.message);
+              reject(err);
+            })
+            .run();
+        });
+        
+        trimmedFiles.push(trimmedPath);
+        
+        // Clean up original file
+        fs.unlinkSync(originalPath);
         
       } catch (error) {
         console.error(`❌ Failed segment ${i + 1}:`, error.message);
       }
     }
     
-    if (localFiles.length === 0) {
+    if (trimmedFiles.length === 0) {
       return res.status(400).json({
         success: false,
-        error: 'No videos downloaded'
+        error: 'No videos processed successfully'
       });
     }
     
-    console.log(`🎥 Starting FFmpeg processing with ${localFiles.length} files...`);
+    console.log(`🔗 Concatenating ${trimmedFiles.length} trimmed segments...`);
     
-    // Create concat file
-    const concatContent = localFiles.map(file => `file '${file}'`).join('\n');
+    // Create concat file with trimmed videos
+    const concatContent = trimmedFiles.map(file => `file '${file}'`).join('\n');
     const concatPath = path.join(tempDir, 'concat.txt');
     fs.writeFileSync(concatPath, concatContent);
     
-    console.log('📝 Concat file created');
-    
     const outputPath = path.join(tempDir, `output_${Date.now()}.mp4`);
     
+    // CONCATENATE TRIMMED VIDEOS
     await new Promise((resolve, reject) => {
-      const command = ffmpeg()
+      ffmpeg()
         .input(concatPath)
         .inputOptions(['-f', 'concat', '-safe', '0'])
         .outputOptions([
-          // AGGRESSIVE COMPRESSION FOR SPEED
-          '-c:v', 'libx264',
-          '-c:a', 'aac',
-          '-preset', 'ultrafast', // Fastest preset
-          '-crf', '35', // Higher compression
-          '-vf', 'scale=480:-2', // Smaller resolution
-          '-r', '20', // Lower framerate
-          '-b:a', '64k', // Lower audio bitrate
+          '-c', 'copy', // Copy streams (no re-encoding)
           '-movflags', '+faststart'
         ])
         .output(outputPath)
-        .on('start', (commandLine) => {
-          console.log('🚀 FFmpeg started (ultrafast preset)');
-          console.log('Command:', commandLine);
+        .on('start', () => {
+          console.log('🔗 Concatenating trimmed videos...');
         })
         .on('progress', (progress) => {
           if (progress.percent) {
-            console.log(`⚡ Progress: ${Math.round(progress.percent)}%`);
+            console.log(`⚡ Concat progress: ${Math.round(progress.percent)}%`);
           }
         })
         .on('end', () => {
-          console.log('✅ FFmpeg completed successfully');
+          console.log('✅ Concatenation completed');
           resolve();
         })
         .on('error', (err) => {
-          console.error('❌ FFmpeg error:', err.message);
-          reject(new Error(`FFmpeg failed: ${err.message}`));
-        });
+          console.error('❌ Concat error:', err.message);
+          reject(new Error(`Concatenation failed: ${err.message}`));
+        })
+        .run();
       
-      // EXTENDED TIMEOUT - 10 minutes
-      const timeout = setTimeout(() => {
-        console.log('⏰ Timeout reached, killing FFmpeg...');
-        command.kill('SIGKILL');
-        reject(new Error('Processing timeout after 10 minutes'));
-      }, 600000); // 10 minutes
-      
-      command.on('end', () => {
-        clearTimeout(timeout);
-      });
-      
-      command.run();
+      // 5 minute timeout for concat
+      setTimeout(() => {
+        reject(new Error('Concatenation timeout'));
+      }, 300000);
     });
     
-    // Read and return result
+    // Read result
     const outputBuffer = fs.readFileSync(outputPath);
     const base64Video = outputBuffer.toString('base64');
     
-    // Cleanup
-    [...localFiles, concatPath, outputPath].forEach(file => {
+    // Cleanup all temp files
+    [...trimmedFiles, concatPath, outputPath].forEach(file => {
       try { 
         if (fs.existsSync(file)) {
           fs.unlinkSync(file); 
         }
-      } catch (e) {
-        console.warn('Cleanup warning:', e.message);
-      }
+      } catch (e) {}
     });
     
     const totalTime = Date.now() - startTime;
+    const expectedDuration = trimmedFiles.length * 5; // 5 seconds per video
     
-    console.log(`🎉 Success! Output: ${(outputBuffer.length / 1024).toFixed(2)} KB in ${(totalTime / 1000).toFixed(2)}s`);
+    console.log(`🎉 Success! ${trimmedFiles.length} videos, expected duration: ${expectedDuration}s`);
+    console.log(`📦 Output size: ${(outputBuffer.length / 1024).toFixed(2)} KB`);
     
     res.json({
       success: true,
-      message: `Successfully processed ${localFiles.length} videos in ${(totalTime / 1000).toFixed(2)}s`,
+      message: `Successfully processed ${trimmedFiles.length} videos, each trimmed to 5 seconds`,
       videoData: `data:video/mp4;base64,${base64Video}`,
       size: outputBuffer.length,
-      videosProcessed: localFiles.length,
+      videosProcessed: trimmedFiles.length,
       videosRequested: timeline.length,
-      compression: {
-        outputSizeKB: (outputBuffer.length / 1024).toFixed(2),
-        settings: '480p, 20fps, CRF35, ultrafast'
-      },
+      expectedDuration: `${expectedDuration} seconds`,
+      quality: '720p, 24fps, CRF28',
       processingTimeMs: totalTime
     });
     
@@ -194,6 +212,6 @@ app.post('/api/sequence-videos', async (req, res) => {
 // Start server
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Video Sequencer API v2.3.2 running on port ${PORT}`);
-  console.log(`⚡ Optimizations: 8 video limit, 10min timeout, ultrafast preset`);
+  console.log(`🚀 Video Sequencer API v2.4.0 running on port ${PORT}`);
+  console.log(`✂️ Features: Proper 5-second trimming, 720p quality, stream copy concat`);
 });
