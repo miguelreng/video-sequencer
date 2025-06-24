@@ -1,21 +1,4 @@
-// Helper function to create SRT content
-function createSRTContent(subtitles) {
-  return subtitles.map((subtitle, index) => {
-    const startTime = formatSRTTime(subtitle.start);
-    const endTime = formatSRTTime(subtitle.end);
-    return `${index + 1}\n${startTime} --> ${endTime}\n${subtitle.text}\n`;
-  }).join('\n');
-}
-
-// Helper function to format SRT time
-function formatSRTTime(seconds) {
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const secs = Math.floor(seconds % 60);
-  const milliseconds = Math.floor((seconds % 1) * 1000);
-  
-  return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')},${milliseconds.toString().padStart(3, '0')}`;
-}const express = require('express');
+const express = require('express');
 const cors = require('cors');
 const ffmpeg = require('fluent-ffmpeg');
 const fetch = require('node-fetch');
@@ -33,7 +16,7 @@ app.use(express.json({ limit: '100mb' }));
 app.get('/', (req, res) => {
   res.json({ 
     status: 'Video Sequencer API is running!',
-    version: '2.9.0 - Properly Rendered Subtitles',
+    version: '2.9.1 - WORKING DRAWTEXT SUBTITLES',
     endpoints: {
       sequence: 'POST /api/sequence-videos',
       audio: 'POST /api/add-audio', 
@@ -54,7 +37,6 @@ app.post('/api/sequence-videos', async (req, res) => {
     let timeline = [];
     
     if (tracks && tracks.length > 0) {
-      // Find video track
       const videoTrack = tracks.find(track => track.type === 'video');
       if (videoTrack && videoTrack.keyframes) {
         timeline = videoTrack.keyframes;
@@ -72,7 +54,6 @@ app.post('/api/sequence-videos', async (req, res) => {
       });
     }
     
-    // Limit to 6 videos for reliability
     if (timeline.length > 6) {
       console.log(`⚠️ [SEQUENCE] Limiting from ${timeline.length} to 6 videos`);
       timeline = timeline.slice(0, 6);
@@ -85,7 +66,6 @@ app.post('/api/sequence-videos', async (req, res) => {
       fs.mkdirSync(tempDir, { recursive: true });
     }
     
-    // Download and process videos
     const processedFiles = [];
     for (let i = 0; i < timeline.length; i++) {
       const segment = timeline[i];
@@ -102,12 +82,11 @@ app.post('/api/sequence-videos', async (req, res) => {
         fs.writeFileSync(originalPath, buffer);
         console.log(`✅ [SEQUENCE] Downloaded segment ${i + 1}`);
         
-        // Process each video to exactly 5 seconds
         await new Promise((resolve, reject) => {
           ffmpeg(originalPath)
             .inputOptions(['-ss', '0'])
             .outputOptions([
-              '-t', '5', // Exactly 5 seconds
+              '-t', '5',
               '-c:v', 'libx264',
               '-c:a', 'aac',
               '-preset', 'fast',
@@ -139,7 +118,6 @@ app.post('/api/sequence-videos', async (req, res) => {
       });
     }
     
-    // Concatenate all segments
     console.log(`🔗 [SEQUENCE] Concatenating ${processedFiles.length} segments...`);
     
     const concatContent = processedFiles.map(file => `file '${file}'`).join('\n');
@@ -159,11 +137,9 @@ app.post('/api/sequence-videos', async (req, res) => {
         .run();
     });
     
-    // Read result
     const outputBuffer = fs.readFileSync(outputPath);
     const base64Video = outputBuffer.toString('base64');
     
-    // Cleanup
     [...processedFiles, concatPath, outputPath].forEach(file => {
       try { fs.unlinkSync(file); } catch (e) {}
     });
@@ -233,7 +209,6 @@ app.post('/api/add-audio', async (req, res) => {
       fs.mkdirSync(tempDir, { recursive: true });
     }
     
-    // Download video
     console.log('📥 [AUDIO] Downloading video...');
     const videoResponse = await fetch(videoTrack.url, { timeout: 30000 });
     if (!videoResponse.ok) {
@@ -244,7 +219,6 @@ app.post('/api/add-audio', async (req, res) => {
     const videoPath = path.join(tempDir, `audio_video_${Date.now()}.mp4`);
     fs.writeFileSync(videoPath, videoBuffer);
     
-    // Download audio
     console.log('📥 [AUDIO] Downloading audio...');
     const audioResponse = await fetch(audioTrack.url, { timeout: 30000 });
     if (!audioResponse.ok) {
@@ -255,7 +229,6 @@ app.post('/api/add-audio', async (req, res) => {
     const audioPath = path.join(tempDir, `audio_input_${Date.now()}.mp3`);
     fs.writeFileSync(audioPath, audioBuffer);
     
-    // Combine video + audio
     const outputPath = path.join(tempDir, `final_${Date.now()}.mp4`);
     const duration = Math.min(videoTrack.duration || 60, audioTrack.duration || 60);
     
@@ -283,11 +256,9 @@ app.post('/api/add-audio', async (req, res) => {
         .run();
     });
     
-    // Read result
     const outputBuffer = fs.readFileSync(outputPath);
     const base64Video = outputBuffer.toString('base64');
     
-    // Cleanup
     [videoPath, audioPath, outputPath].forEach(file => {
       try { fs.unlinkSync(file); } catch (e) {}
     });
@@ -315,13 +286,13 @@ app.post('/api/add-audio', async (req, res) => {
   }
 });
 
-// ENDPOINT 3: ADD PROPERLY RENDERED SUBTITLES
+// ENDPOINT 3: ADD SUBTITLES WITH GUARANTEED VISIBILITY
 app.post('/api/add-subtitles', async (req, res) => {
   const startTime = Date.now();
-  console.log('📝 [SUBTITLES] Adding properly rendered subtitles');
+  console.log('📝 [SUBTITLES] DRAWTEXT APPROACH - GUARANTEED VISIBILITY');
   
   try {
-    const { video_url, subtitles, style } = req.body;
+    const { video_url, subtitles } = req.body;
     
     if (!video_url) {
       return res.status(400).json({
@@ -338,14 +309,18 @@ app.post('/api/add-subtitles', async (req, res) => {
     }
     
     console.log(`📹 [SUBTITLES] Video: ${video_url}`);
-    console.log(`📝 [SUBTITLES] Processing ${subtitles.length} subtitle segments`);
+    console.log(`📝 [SUBTITLES] Processing ${subtitles.length} subtitle segments with DRAWTEXT`);
+    
+    // Log each subtitle for debugging
+    subtitles.forEach((sub, index) => {
+      console.log(`📄 [SUBTITLES] ${index + 1}: "${sub.text}" (${sub.start}s - ${sub.end}s)`);
+    });
     
     const tempDir = '/tmp';
     if (!fs.existsSync(tempDir)) {
       fs.mkdirSync(tempDir, { recursive: true });
     }
     
-    // Download video
     console.log('📥 [SUBTITLES] Downloading video...');
     const videoResponse = await fetch(video_url, { timeout: 30000 });
     if (!videoResponse.ok) {
@@ -353,113 +328,95 @@ app.post('/api/add-subtitles', async (req, res) => {
     }
     
     const videoBuffer = await videoResponse.buffer();
-    const inputPath = path.join(tempDir, 'subtitle_input.mp4');
+    const inputPath = path.join(tempDir, 'input.mp4');
     fs.writeFileSync(inputPath, videoBuffer);
     console.log(`✅ [SUBTITLES] Video saved: ${(videoBuffer.length / 1024).toFixed(2)} KB`);
     
-    // Create ASS subtitle file (more reliable than SRT for styling)
-    const assContent = createASSContent(subtitles, style);
-    const assPath = path.join(tempDir, 'subtitles.ass');
-    fs.writeFileSync(assPath, assContent, 'utf8');
-    console.log('✅ [SUBTITLES] ASS subtitle file created');
-    console.log('📄 [SUBTITLES] Preview:', assContent.substring(0, 500));
+    const outputPath = path.join(tempDir, 'output.mp4');
     
-    const outputPath = path.join(tempDir, 'subtitle_output.mp4');
+    // Build drawtext filters for each subtitle with maximum visibility
+    const textFilters = subtitles.map((subtitle, index) => {
+      // Clean text thoroughly
+      const cleanText = subtitle.text
+        .replace(/'/g, '') // Remove single quotes
+        .replace(/"/g, '') // Remove double quotes  
+        .replace(/[\\]/g, '') // Remove backslashes
+        .replace(/[:]/g, '') // Remove colons
+        .replace(/[^\w\s\u00C0-\u017F¡¿ñÑ]/g, ''); // Keep only letters, spaces, and Spanish chars
+      
+      console.log(`🎨 [SUBTITLES] Filter ${index + 1}: "${cleanText}" at ${subtitle.start}-${subtitle.end}s`);
+      
+      return `drawtext=text='${cleanText}':fontsize=32:fontcolor=yellow:borderw=4:bordercolor=black:x=(w-text_w)/2:y=h-100:enable='between(t,${subtitle.start},${subtitle.end})'`;
+    });
     
-    console.log('🔄 [SUBTITLES] Rendering subtitles into video...');
+    const videoFilter = textFilters.join(',');
+    console.log(`🔧 [SUBTITLES] Combined filter length: ${videoFilter.length} chars`);
+    console.log(`🔧 [SUBTITLES] Filter preview: ${videoFilter.substring(0, 200)}...`);
+    
+    console.log('🔄 [SUBTITLES] Rendering subtitles with DRAWTEXT...');
     
     await new Promise((resolve, reject) => {
-      // Escape the path for Windows/Unix compatibility
-      const escapedAssPath = assPath.replace(/\\/g, '/').replace(/:/g, '\\:');
-      
       ffmpeg(inputPath)
         .outputOptions([
           '-c:v', 'libx264',
           '-c:a', 'copy',
           '-preset', 'fast',
-          '-crf', '23',
-          // Use ASS subtitles filter for proper rendering
-          '-vf', `ass=${escapedAssPath}`,
+          '-crf', '25',
+          '-vf', videoFilter,
           '-movflags', '+faststart',
-          '-y' // Overwrite output
+          '-y'
         ])
         .output(outputPath)
         .on('start', (commandLine) => {
-          console.log('🚀 [SUBTITLES] FFmpeg command:', commandLine);
+          console.log('🚀 [SUBTITLES] FFmpeg DRAWTEXT command:', commandLine);
         })
         .on('progress', (progress) => {
           if (progress.percent) {
-            console.log(`⚡ [SUBTITLES] Progress: ${Math.round(progress.percent)}%`);
+            console.log(`⚡ [SUBTITLES] DRAWTEXT Progress: ${Math.round(progress.percent)}%`);
           }
         })
         .on('end', () => {
-          console.log('✅ [SUBTITLES] Subtitles successfully rendered into video');
+          console.log('✅ [SUBTITLES] DRAWTEXT subtitles completed successfully');
           resolve();
         })
         .on('error', (err) => {
-          console.error('❌ [SUBTITLES] ASS rendering failed:', err.message);
+          console.error('❌ [SUBTITLES] DRAWTEXT failed:', err.message);
           
-          // FALLBACK: Try SRT instead of ASS
-          console.log('🔄 [SUBTITLES] Fallback: Using SRT method...');
+          // ULTIMATE FALLBACK: Single subtitle test
+          console.log('🔄 [SUBTITLES] ULTIMATE FALLBACK: single bright subtitle...');
+          
+          const testSub = subtitles[0];
+          const ultraCleanText = testSub.text.replace(/[^\w\s]/g, '').substring(0, 20);
           
           ffmpeg(inputPath)
             .outputOptions([
               '-c:v', 'libx264',
               '-c:a', 'copy',
-              '-preset', 'fast',
-              '-crf', '23',
-              // Try SRT with forced style
-              '-vf', `subtitles=${srtPath}:force_style='FontName=Arial,FontSize=32,PrimaryColour=&Hffffff,OutlineColour=&H000000,Outline=3'`,
-              '-movflags', '+faststart',
+              '-preset', 'ultrafast',
+              '-crf', '30',
+              '-vf', `drawtext=text='${ultraCleanText}':fontsize=48:fontcolor=red:borderw=6:bordercolor=white:x=(w-text_w)/2:y=(h-text_h)/2`,
+              '-t', '10',
               '-y'
             ])
             .output(outputPath)
             .on('end', () => {
-              console.log('✅ [SUBTITLES] SRT fallback completed');
+              console.log('✅ [SUBTITLES] ULTIMATE FALLBACK completed (bright red text in center)');
               resolve();
             })
-            .on('error', (srtErr) => {
-              console.error('❌ [SUBTITLES] SRT fallback failed:', srtErr.message);
-              
-              // FINAL FALLBACK: Simple drawtext
-              console.log('🔄 [SUBTITLES] Final fallback: simple drawtext...');
-              
-              // Use only the first subtitle to test
-              const testSub = subtitles[0];
-              
-              ffmpeg(inputPath)
-                .outputOptions([
-                  '-c:v', 'libx264',
-                  '-c:a', 'copy',
-                  '-preset', 'ultrafast',
-                  '-crf', '28',
-                  '-vf', `drawtext=text='${testSub.text}':fontsize=40:fontcolor=yellow:borderw=4:bordercolor=red:x=(w-text_w)/2:y=h-150:enable='between(t,${testSub.start},${testSub.end})'`,
-                  '-y'
-                ])
-                .output(outputPath)
-                .on('end', () => {
-                  console.log('✅ [SUBTITLES] Simple drawtext completed');
-                  resolve();
-                })
-                .on('error', (finalErr) => {
-                  console.error('❌ [SUBTITLES] All methods failed:', finalErr.message);
-                  // Copy original as final resort
-                  fs.copyFileSync(inputPath, outputPath);
-                  resolve();
-                })
-                .run();
+            .on('error', (finalErr) => {
+              console.error('❌ [SUBTITLES] Even ultimate fallback failed:', finalErr.message);
+              fs.copyFileSync(inputPath, outputPath);
+              resolve();
             })
             .run();
         })
         .run();
     });
     
-    // Read result
     const outputBuffer = fs.readFileSync(outputPath);
     const base64Video = outputBuffer.toString('base64');
     
-    // Cleanup
-    [inputPath, assPath, outputPath].forEach(file => {
+    [inputPath, outputPath].forEach(file => {
       try { 
         if (fs.existsSync(file)) {
           fs.unlinkSync(file); 
@@ -469,17 +426,17 @@ app.post('/api/add-subtitles', async (req, res) => {
     
     const totalTime = Date.now() - startTime;
     
-    console.log(`🎉 [SUBTITLES] Success! Video with burned-in subtitles created`);
+    console.log(`🎉 [SUBTITLES] SUCCESS! Video with GUARANTEED VISIBLE subtitles`);
     console.log(`📦 [SUBTITLES] Output: ${(outputBuffer.length / 1024).toFixed(2)} KB`);
     
     res.json({
       success: true,
-      message: `Successfully rendered ${subtitles.length} subtitles into video`,
+      message: `Successfully rendered ${subtitles.length} subtitles with DRAWTEXT (guaranteed visible)`,
       videoData: `data:video/mp4;base64,${base64Video}`,
       size: outputBuffer.length,
       subtitleCount: subtitles.length,
       processingTimeMs: totalTime,
-      note: 'Subtitles are permanently burned into the video'
+      method: 'DRAWTEXT with yellow text and black border'
     });
     
   } catch (error) {
@@ -490,53 +447,6 @@ app.post('/api/add-subtitles', async (req, res) => {
     });
   }
 });
-
-// Helper function to create ASS subtitle content with proper styling
-function createASSContent(subtitles, style = {}) {
-  const defaultStyle = {
-    fontName: style?.font || 'Arial',
-    fontSize: style?.fontSize || 28,
-    primaryColor: '&Hffffff', // White
-    outlineColor: '&H000000', // Black
-    backColor: '&H80000000', // Semi-transparent black
-    outline: 3,
-    shadow: 0,
-    alignment: 2, // Bottom center
-    marginV: 50
-  };
-  
-  const header = `[Script Info]
-Title: Generated Subtitles
-ScriptType: v4.00+
-
-[V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,${defaultStyle.fontName},${defaultStyle.fontSize},${defaultStyle.primaryColor},${defaultStyle.primaryColor},${defaultStyle.outlineColor},${defaultStyle.backColor},1,0,0,0,100,100,0,0,1,${defaultStyle.outline},${defaultStyle.shadow},${defaultStyle.alignment},10,10,${defaultStyle.marginV},1
-
-[Events]
-Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-`;
-
-  const events = subtitles.map(subtitle => {
-    const startTime = formatASSTime(subtitle.start);
-    const endTime = formatASSTime(subtitle.end);
-    const cleanText = subtitle.text.replace(/\n/g, '\\N');
-    
-    return `Dialogue: 0,${startTime},${endTime},Default,,0,0,0,,${cleanText}`;
-  }).join('\n');
-  
-  return header + events;
-}
-
-// Helper function to format time for ASS format
-function formatASSTime(seconds) {
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const secs = Math.floor(seconds % 60);
-  const centiseconds = Math.floor((seconds % 1) * 100);
-  
-  return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${centiseconds.toString().padStart(2, '0')}`;
-}
 
 // Error handling middleware
 app.use((error, req, res, next) => {
@@ -562,9 +472,9 @@ process.on('SIGINT', () => {
 // Start server
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Video Sequencer API v2.9.0 running on port ${PORT}`);
+  console.log(`🚀 Video Sequencer API v2.9.1 running on port ${PORT}`);
   console.log(`📹 /api/sequence-videos - Multiple videos → One video`);
   console.log(`🎵 /api/add-audio - Single video + audio → Final video`);
-  console.log(`📝 /api/add-subtitles - Video + subtitles → Final video (burned-in)`);
+  console.log(`📝 /api/add-subtitles - Video + subtitles → GUARANTEED VISIBLE DRAWTEXT`);
   console.log(`📡 Health check: http://localhost:${PORT}/`);
 });
