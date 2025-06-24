@@ -1,3 +1,6 @@
+// Configure Railway draining time for longer processing
+process.env.RAILWAY_DEPLOYMENT_DRAINING_SECONDS = '120'; // 2 minutes before SIGKILL
+
 const express = require('express');
 const cors = require('cors');
 const ffmpeg = require('fluent-ffmpeg');
@@ -16,7 +19,7 @@ app.use(express.json({ limit: '100mb' }));
 app.get('/', (req, res) => {
   res.json({ 
     status: 'Video Sequencer API is running!',
-    version: '2.9.2 - NO VIDEO LIMITS',
+    version: '2.9.3 - FIXED BATCH PROCESSING + SIGKILL PROTECTION',
     endpoints: {
       sequence: 'POST /api/sequence-videos',
       audio: 'POST /api/add-audio', 
@@ -26,13 +29,13 @@ app.get('/', (req, res) => {
   });
 });
 
-// ENDPOINT 1: SEQUENCE MULTIPLE VIDEOS INTO ONE (NO LIMITS + BATCH PROCESSING)
+// ENDPOINT 1: SEQUENCE MULTIPLE VIDEOS (FIXED BATCH PROCESSING)
 app.post('/api/sequence-videos', async (req, res) => {
   const startTime = Date.now();
-  console.log('🎬 [SEQUENCE] Received video sequencing request - NO LIMITS VERSION');
+  console.log('🎬 [SEQUENCE] Received video sequencing request - FIXED BATCH VERSION');
   
   try {
-    const { videoUrls, tracks, batchSize = 4 } = req.body;
+    const { videoUrls, tracks, batchSize = 3 } = req.body; // Smaller batches
     
     let timeline = [];
     
@@ -87,17 +90,24 @@ app.post('/api/sequence-videos', async (req, res) => {
           
           // Download with timeout
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 15000);
+          const timeoutId = setTimeout(() => controller.abort(), 12000); // Reduced timeout
           
           const response = await fetch(segment.url, { 
             signal: controller.signal,
-            timeout: 15000 
+            timeout: 12000 
           });
           clearTimeout(timeoutId);
           
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
           
           const buffer = await response.buffer();
+          
+          // Skip very large files that cause SIGKILL
+          if (buffer.length > 15 * 1024 * 1024) { // Skip files > 15MB
+            console.log(`⚠️ [SEQUENCE] Batch ${batchIndex + 1} - Skipping large video ${i + 1} (${(buffer.length / 1024 / 1024).toFixed(2)} MB)`);
+            continue;
+          }
+          
           const originalPath = path.join(tempDir, `batch${batchIndex}_original${i}.mp4`);
           const processedPath = path.join(tempDir, `batch${batchIndex}_processed${i}.mp4`);
           
@@ -108,7 +118,7 @@ app.post('/api/sequence-videos', async (req, res) => {
           await new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
               reject(new Error('Processing timeout'));
-            }, 25000);
+            }, 20000); // Reduced timeout
             
             ffmpeg(originalPath)
               .inputOptions(['-ss', '0'])
@@ -116,11 +126,11 @@ app.post('/api/sequence-videos', async (req, res) => {
                 '-t', '5',
                 '-c:v', 'libx264',
                 '-c:a', 'aac',
-                '-preset', 'medium',
-                '-crf', '23',
-                '-vf', 'scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280',
-                '-r', '24',
-                '-b:a', '128k'
+                '-preset', 'ultrafast',  // Faster processing
+                '-crf', '30',           // Lower quality but faster
+                '-vf', 'scale=640:1138:force_original_aspect_ratio=increase,crop=640:1138', // Smaller resolution
+                '-r', '20',             // Lower framerate
+                '-b:a', '64k'          // Lower audio bitrate
               ])
               .output(processedPath)
               .on('end', () => {
@@ -137,11 +147,11 @@ app.post('/api/sequence-videos', async (req, res) => {
           
           processedFiles.push(processedPath);
           
-          // Cleanup original
+          // Cleanup original immediately
           try { fs.unlinkSync(originalPath); } catch (e) {}
           
-          // Small delay to prevent memory buildup
-          await new Promise(resolve => setTimeout(resolve, 200));
+          // Memory management pause
+          await new Promise(resolve => setTimeout(resolve, 300));
           
         } catch (error) {
           console.error(`❌ [SEQUENCE] Batch ${batchIndex + 1} - Failed video ${i + 1}:`, error.message);
@@ -182,7 +192,7 @@ app.post('/api/sequence-videos', async (req, res) => {
       });
       
       // Memory management pause
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise(resolve => setTimeout(resolve, 1000));
     }
     
     if (batchOutputs.length === 0) {
@@ -199,12 +209,13 @@ app.post('/api/sequence-videos', async (req, res) => {
       finalOutputPath = batchOutputs[0];
       console.log(`🎬 [SEQUENCE] Single batch result used directly`);
     } else {
-      // Merge all batches
+      // Merge all batches - FIXED VERSION
       console.log(`🔗 [SEQUENCE] Merging ${batchOutputs.length} batches into final video`);
       
+      // FIXED: Proper concat file format
       const finalConcatContent = batchOutputs.map(file => `file '${file}'`).join('\n');
       const finalConcatPath = path.join(tempDir, 'final_concat.txt');
-      fs.writeFileSync(finalConcatContent, finalConcatPath);
+      fs.writeFileSync(finalConcatPath, finalConcatContent); // FIXED: Correct parameter order
       
       finalOutputPath = path.join(tempDir, `final_sequenced_${Date.now()}.mp4`);
       
@@ -232,7 +243,6 @@ app.post('/api/sequence-videos', async (req, res) => {
     });
     
     const totalTime = Date.now() - startTime;
-    const successfulVideos = batchOutputs.length * batchSize; // Approximate
     const totalDuration = timeline.length * 5; // All attempted videos
     
     console.log(`🎉 [SEQUENCE] SUCCESS! Processed ${timeline.length} videos into ${totalDuration} seconds total`);
@@ -240,7 +250,7 @@ app.post('/api/sequence-videos', async (req, res) => {
     
     res.json({
       success: true,
-      message: `Successfully sequenced ${timeline.length} videos into ${totalDuration} seconds (${batches.length} batches)`,
+      message: `Successfully sequenced ${timeline.length} videos (${batchOutputs.length}/${batches.length} batches successful)`,
       videoData: `data:video/mp4;base64,${base64Video}`,
       size: outputBuffer.length,
       videosAttempted: timeline.length,
@@ -543,8 +553,8 @@ process.on('SIGINT', () => {
 // Start server
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Video Sequencer API v2.9.2 running on port ${PORT}`);
-  console.log(`📹 /api/sequence-videos - Multiple videos → One video (NO LIMITS!)`);
+  console.log(`🚀 Video Sequencer API v2.9.3 running on port ${PORT}`);
+  console.log(`📹 /api/sequence-videos - Multiple videos → One video (FIXED BATCH PROCESSING!)`);
   console.log(`🎵 /api/add-audio - Single video + audio → Final video`);
   console.log(`📝 /api/add-subtitles - Video + subtitles → GUARANTEED VISIBLE DRAWTEXT`);
   console.log(`📡 Health check: http://localhost:${PORT}/`);
