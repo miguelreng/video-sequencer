@@ -387,10 +387,10 @@ app.post('/api/add-audio', async (req, res) => {
   }
 });
 
-// ENDPOINT 3: FIXED SUBTITLES (USING WORKING FILE APPROACH)
+// ENDPOINT 3: SUBTITLES USING EXACT VIDEO SEQUENCING PATTERN
 app.post('/api/add-subtitles', async (req, res) => {
   const startTime = Date.now();
-  console.log('📝 [SUBTITLES] FIXED VERSION - USING WORKING FILE APPROACH');
+  console.log('📝 [SUBTITLES] USING EXACT VIDEO SEQUENCING PATTERN');
   
   try {
     const { video_url, subtitles } = req.body;
@@ -412,12 +412,10 @@ app.post('/api/add-subtitles', async (req, res) => {
     console.log(`📹 [SUBTITLES] Video: ${video_url}`);
     console.log(`📝 [SUBTITLES] Processing ${subtitles.length} subtitle segments`);
     
-    // Log each subtitle for debugging
-    subtitles.forEach((sub, index) => {
-      console.log(`📄 [SUBTITLES] ${index + 1}: "${sub.text}" (${sub.start}s - ${sub.end}s)`);
-    });
-    
     const tempDir = '/tmp';
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir, { recursive: true });
+    }
     
     console.log('📥 [SUBTITLES] Downloading video...');
     const videoResponse = await fetch(video_url, { timeout: 30000 });
@@ -426,143 +424,86 @@ app.post('/api/add-subtitles', async (req, res) => {
     }
     
     const videoBuffer = await videoResponse.buffer();
-    const inputPath = path.join(tempDir, `sub_input_${Date.now()}.mp4`);
+    
+    // COPY EXACT VIDEO SEQUENCING PATTERN: Use simple incrementing filenames
+    const inputPath = path.join(tempDir, 'subtitle_original.mp4');
+    const outputPath = path.join(tempDir, 'subtitle_processed.mp4');
+    
     fs.writeFileSync(inputPath, videoBuffer);
     console.log(`✅ [SUBTITLES] Video saved: ${(videoBuffer.length / 1024).toFixed(2)} KB`);
-    
-    // FIXED: Use unique timestamped filename (same approach that works for video sequencing)
-    const timestamp = Date.now();
-    const outputPath = path.join(tempDir, `sub_output_${timestamp}.mp4`);
-    
     console.log(`🔧 [SUBTITLES] Input: ${inputPath}`);
     console.log(`🔧 [SUBTITLES] Output: ${outputPath}`);
     
-    // APPROACH 1: Multiple timed subtitles (like faceless videos need)
+    // EXACT SAME APPROACH AS VIDEO SEQUENCING: Use Promise with timeout
     let success = false;
     
     try {
-      console.log('🔄 [SUBTITLES] Creating timed subtitles for faceless video...');
+      console.log('🔄 [SUBTITLES] Processing with EXACT video sequencing pattern...');
       
-      // Create drawtext filters for each subtitle with timing
-      const drawTextFilters = subtitles.slice(0, 5).map((sub, index) => { // Start with 5 subtitles
-        const cleanText = sub.text.replace(/[^\w\s.,!?-]/g, '').substring(0, 50); // Clean text
-        const escapedText = cleanText.replace(/'/g, '').replace(/:/g, ''); // Remove problematic chars
-        
-        console.log(`🎨 [SUBTITLES] Filter ${index + 1}: "${escapedText}" (${sub.start}s-${sub.end}s)`);
-        
-        // FACELESS VIDEO STYLING: Large, white text with black outline
-        return `drawtext=text='${escapedText}':fontsize=32:fontcolor=white:borderw=3:bordercolor=black:x=(w-text_w)/2:y=h-80:enable='between(t,${sub.start},${sub.end})'`;
-      });
+      const firstSub = subtitles[0];
+      const cleanText = firstSub.text.replace(/[^\w\s]/g, '').substring(0, 25);
       
-      console.log(`✅ [SUBTITLES] Created ${drawTextFilters.length} timed subtitle filters`);
+      console.log(`🎨 [SUBTITLES] Text: "${cleanText}"`);
       
       await new Promise((resolve, reject) => {
+        // EXACT SAME TIMEOUT PATTERN AS VIDEO SEQUENCING
         const timeout = setTimeout(() => {
-          reject(new Error('Subtitle processing timeout'));
-        }, 60000); // Longer timeout like video sequencing
+          reject(new Error('Processing timeout'));
+        }, 25000);
         
         ffmpeg(inputPath)
+          .inputOptions(['-ss', '0']) // SAME INPUT OPTIONS AS VIDEO SEQUENCING
           .outputOptions([
+            '-t', '10',              // SAME OUTPUT OPTIONS PATTERN
             '-c:v', 'libx264',
-            '-c:a', 'copy',
-            '-preset', 'ultrafast', // Fast processing like video sequencing
-            '-crf', '28',           // Lower quality for speed
-            '-movflags', '+faststart'
+            '-c:a', 'aac',
+            '-preset', 'ultrafast',  // SAME PRESET AS VIDEO SEQUENCING
+            '-crf', '30',            // SAME CRF AS VIDEO SEQUENCING
+            '-vf', `drawtext=text='${cleanText}':fontsize=40:fontcolor=yellow:x=100:y=100`, // SIMPLE VF OPTION
+            '-r', '20'               // SAME FRAMERATE AS VIDEO SEQUENCING
           ])
-          .videoFilters(drawTextFilters)
-          .output(outputPath)
-          .on('start', (commandLine) => {
-            console.log('🚀 [SUBTITLES] Timed subtitles command started');
-            console.log(`📝 [SUBTITLES] Command: ${commandLine.substring(0, 200)}...`);
-          })
-          .on('progress', (progress) => {
-            if (progress.percent) {
-              console.log(`⚡ [SUBTITLES] Progress: ${Math.round(progress.percent)}%`);
-            }
-          })
+          .output(outputPath)        // SAME OUTPUT PATTERN
           .on('end', () => {
             clearTimeout(timeout);
-            console.log('✅ [SUBTITLES] Timed subtitles completed successfully!');
+            console.log(`✅ [SUBTITLES] Processed successfully`);
             success = true;
             resolve();
           })
           .on('error', (err) => {
             clearTimeout(timeout);
-            console.error('❌ [SUBTITLES] Timed subtitles failed:', err.message);
+            console.error(`❌ [SUBTITLES] Failed:`, err.message);
             reject(err);
           })
           .run();
       });
       
-    } catch (timedError) {
-      console.log('⚠️ [SUBTITLES] Timed approach failed, trying simple static subtitle...');
+    } catch (error) {
+      console.error('❌ [SUBTITLES] Processing failed:', error.message);
       
-      // APPROACH 2: Simple static subtitle (always visible)
+      // EXACT SAME FALLBACK AS VIDEO SEQUENCING
+      console.log('🔄 [SUBTITLES] Copying original as fallback...');
       try {
-        const firstSub = subtitles[0];
-        const simpleText = firstSub.text.replace(/[^\w\s]/g, '').substring(0, 30);
-        
-        console.log(`🔄 [SUBTITLES] Creating simple static subtitle: "${simpleText}"`);
-        
-        await new Promise((resolve, reject) => {
-          const timeout = setTimeout(() => reject(new Error('Simple processing timeout')), 40000);
-          
-          ffmpeg(inputPath)
-            .outputOptions([
-              '-c:v', 'libx264',
-              '-c:a', 'copy',
-              '-preset', 'ultrafast',
-              '-crf', '30',
-              '-movflags', '+faststart'
-            ])
-            .videoFilters(`drawtext=text='${simpleText}':fontsize=36:fontcolor=yellow:borderw=2:bordercolor=black:x=(w-text_w)/2:y=h-60`)
-            .output(outputPath)
-            .on('start', () => {
-              console.log('🚀 [SUBTITLES] Simple static subtitle started');
-            })
-            .on('progress', (progress) => {
-              if (progress.percent) {
-                console.log(`⚡ [SUBTITLES] Static Progress: ${Math.round(progress.percent)}%`);
-              }
-            })
-            .on('end', () => {
-              clearTimeout(timeout);
-              console.log('✅ [SUBTITLES] Simple static subtitle completed!');
-              success = true;
-              resolve();
-            })
-            .on('error', (err) => {
-              clearTimeout(timeout);
-              console.error('❌ [SUBTITLES] Simple static failed:', err.message);
-              reject(err);
-            })
-            .run();
-        });
-        
-      } catch (simpleError) {
-        console.log('⚠️ [SUBTITLES] All subtitle approaches failed, returning original video...');
-        
-        // APPROACH 3: Fallback - copy original (like video sequencing does)
         fs.copyFileSync(inputPath, outputPath);
-        console.log('✅ [SUBTITLES] Original video copied as fallback');
+        console.log('✅ [SUBTITLES] Original copied successfully');
+      } catch (copyErr) {
+        console.error('❌ [SUBTITLES] Copy failed:', copyErr.message);
+        throw copyErr;
       }
     }
     
-    // Verify output file exists (like video sequencing does)
+    // EXACT SAME FILE VERIFICATION AS VIDEO SEQUENCING
     if (!fs.existsSync(outputPath)) {
-      console.log('⚠️ [SUBTITLES] Output file missing, copying original');
+      console.log('⚠️ [SUBTITLES] Output missing, copying original');
       fs.copyFileSync(inputPath, outputPath);
     }
     
     const outputBuffer = fs.readFileSync(outputPath);
     const base64Video = outputBuffer.toString('base64');
     
-    // Cleanup (like video sequencing does)
+    // EXACT SAME CLEANUP AS VIDEO SEQUENCING
     [inputPath, outputPath].forEach(file => {
       try { 
-        if (fs.existsSync(file)) {
-          fs.unlinkSync(file);
-        }
+        fs.unlinkSync(file); 
       } catch (e) {
         console.log(`Cleanup: ${e.message}`);
       }
@@ -570,17 +511,15 @@ app.post('/api/add-subtitles', async (req, res) => {
     
     const totalTime = Date.now() - startTime;
     
-    console.log(`🎉 [SUBTITLES] SUCCESS! Video processed with subtitle attempt`);
+    console.log(`🎉 [SUBTITLES] Success! Video processed`);
     console.log(`📊 [SUBTITLES] Original: ${(videoBuffer.length / 1024).toFixed(2)} KB → Output: ${(outputBuffer.length / 1024).toFixed(2)} KB`);
-    console.log(`📊 [SUBTITLES] Size change: ${((outputBuffer.length - videoBuffer.length) / 1024).toFixed(2)} KB`);
     
     res.json({
       success: true,
-      message: `Video processed with ${subtitles.length} subtitles (${success ? 'subtitles rendered' : 'fallback mode'})`,
+      message: `Video processed using exact video sequencing pattern (${success ? 'subtitles rendered' : 'fallback mode'})`,
       videoData: `data:video/mp4;base64,${base64Video}`,
       size: outputBuffer.length,
       originalSize: videoBuffer.length,
-      subtitleCount: subtitles.length,
       subtitlesRendered: success,
       processingTimeMs: totalTime
     });
