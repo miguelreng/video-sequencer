@@ -387,10 +387,10 @@ app.post('/api/add-audio', async (req, res) => {
   }
 });
 
-// ENDPOINT 3: ADD SUBTITLES (WORKING VERSION WITH MULTIPLE APPROACHES)
+// ENDPOINT 3: ADD SUBTITLES (DEBUGGING VERSION - IMPOSSIBLE TO MISS)
 app.post('/api/add-subtitles', async (req, res) => {
   const startTime = Date.now();
-  console.log('📝 [SUBTITLES] WORKING SUBTITLE IMPLEMENTATION');
+  console.log('📝 [SUBTITLES] DEBUGGING - IMPOSSIBLE TO MISS VERSION');
   
   try {
     const { video_url, subtitles } = req.body;
@@ -410,12 +410,7 @@ app.post('/api/add-subtitles', async (req, res) => {
     }
     
     console.log(`📹 [SUBTITLES] Video: ${video_url}`);
-    console.log(`📝 [SUBTITLES] Processing ${subtitles.length} subtitle segments`);
-    
-    // Log each subtitle for debugging
-    subtitles.forEach((sub, index) => {
-      console.log(`📄 [SUBTITLES] ${index + 1}: "${sub.text}" (${sub.start}s - ${sub.end}s)`);
-    });
+    console.log(`📝 [SUBTITLES] Creating IMPOSSIBLE TO MISS test subtitle`);
     
     const tempDir = '/tmp';
     
@@ -432,179 +427,77 @@ app.post('/api/add-subtitles', async (req, res) => {
     
     const outputPath = path.join(tempDir, `sub_output_${Date.now()}.mp4`);
     
-    // APPROACH 1: Try SRT format (most reliable) - OPTIMIZED FOR FACELESS VIDEOS
-    let success = false;
+    // APPROACH 1: HUGE RED TEXT IN CENTER (IMPOSSIBLE TO MISS)
+    console.log('🔴 [SUBTITLES] Creating HUGE RED TEXT in center of screen...');
     
-    try {
-      console.log('🔄 [SUBTITLES] Approach 1: SRT format subtitles (FACELESS VIDEO OPTIMIZED)...');
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('Processing timeout')), 45000);
       
-      // Create SRT subtitle file
-      const srtContent = subtitles.map((sub, index) => {
-        const startTime = formatSRTTime(sub.start);
-        const endTime = formatSRTTime(sub.end);
-        // Clean text but preserve important punctuation for faceless videos
-        const cleanText = sub.text.replace(/[<>&"]/g, '').trim();
-        
-        return `${index + 1}\n${startTime} --> ${endTime}\n${cleanText}\n`;
-      }).join('\n');
-      
-      const srtPath = path.join(tempDir, `subtitles_${Date.now()}.srt`);
-      fs.writeFileSync(srtPath, srtContent, 'utf8');
-      
-      console.log('📄 [SUBTITLES] SRT file created for faceless video');
-      console.log('SRT preview:', srtContent.substring(0, 300) + '...');
-      
-      await new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('SRT processing timeout')), 60000); // Longer timeout
-        
-        ffmpeg(inputPath)
-          .outputOptions([
-            '-c:v', 'libx264',
-            '-c:a', 'copy',
-            '-preset', 'fast', // Better quality for faceless videos
-            '-crf', '25',      // Higher quality
-            '-movflags', '+faststart'
-          ])
-          // FIXED: Simplified SRT styling (the complex styling was causing syntax errors)
-          .videoFilters(`subtitles=${srtPath}:force_style='FontSize=28,PrimaryColour=&Hffffff,OutlineColour=&H000000,Outline=2,Alignment=2'`)
-          .output(outputPath)
-          .on('start', (commandLine) => {
-            console.log('🚀 [SUBTITLES] SRT command started for faceless video');
-          })
-          .on('progress', (progress) => {
-            if (progress.percent) {
-              console.log(`⚡ [SUBTITLES] SRT Progress: ${Math.round(progress.percent)}%`);
-            }
-          })
-          .on('end', () => {
-            clearTimeout(timeout);
-            console.log('✅ [SUBTITLES] FACELESS VIDEO SRT subtitles completed successfully!');
-            success = true;
-            
-            // Cleanup SRT file
-            try { fs.unlinkSync(srtPath); } catch (e) {}
-            
-            resolve();
-          })
-          .on('error', (err) => {
-            clearTimeout(timeout);
-            console.error('❌ [SUBTITLES] SRT failed:', err.message);
-            
-            // Cleanup SRT file
-            try { fs.unlinkSync(srtPath); } catch (e) {}
-            
-            reject(err);
-          })
-          .run();
-      });
-      
-    } catch (srtError) {
-      console.log('⚠️ [SUBTITLES] SRT approach failed, trying drawtext...');
-      
-      // APPROACH 2: Multiple drawtext filters (FACELESS VIDEO OPTIMIZED)
-      try {
-        console.log('🔄 [SUBTITLES] Approach 2: Faceless video drawtext filters...');
-        
-        const drawTextFilters = subtitles.slice(0, 3).map((sub, index) => { // Start with just 3 for testing
-          const cleanText = sub.text.replace(/[^\w\s.,!?]/g, '').substring(0, 40); // Keep punctuation, shorter text
-          const escapedText = cleanText.replace(/'/g, '').replace(/:/g, ''); // Remove problematic characters
+      ffmpeg(inputPath)
+        .outputOptions([
+          '-c:v', 'libx264',
+          '-c:a', 'copy',
+          '-preset', 'fast',
+          '-crf', '25',
+          '-movflags', '+faststart'
+        ])
+        // HUGE RED TEXT IN CENTER - IMPOSSIBLE TO MISS
+        .videoFilters('drawtext=text=SUBTITLE TEST:fontsize=80:fontcolor=red:x=(w-text_w)/2:y=(h-text_h)/2:box=1:boxcolor=yellow@0.8:boxborderw=10')
+        .output(outputPath)
+        .on('start', (commandLine) => {
+          console.log('🚀 [SUBTITLES] HUGE RED TEXT command started');
+          console.log('Command:', commandLine);
+        })
+        .on('progress', (progress) => {
+          if (progress.percent) {
+            console.log(`⚡ [SUBTITLES] Progress: ${Math.round(progress.percent)}%`);
+          }
+        })
+        .on('end', () => {
+          clearTimeout(timeout);
+          console.log('✅ [SUBTITLES] HUGE RED TEXT completed - SHOULD BE IMPOSSIBLE TO MISS!');
+          resolve();
+        })
+        .on('error', (err) => {
+          clearTimeout(timeout);
+          console.error('❌ [SUBTITLES] HUGE RED TEXT failed:', err.message);
           
-          // SIMPLIFIED FACELESS VIDEO STYLING
-          return `drawtext=text='${escapedText}':fontsize=32:fontcolor=white:borderw=2:bordercolor=black:x=(w-text_w)/2:y=h-80:enable='between(t,${sub.start},${sub.end})'`;
-        });
-        
-        console.log(`🎨 [SUBTITLES] Created ${drawTextFilters.length} faceless video drawtext filters`);
-        console.log('Filter preview:', drawTextFilters[0].substring(0, 120) + '...');
-        
-        await new Promise((resolve, reject) => {
-          const timeout = setTimeout(() => reject(new Error('Drawtext processing timeout')), 50000);
+          // FALLBACK: EVEN SIMPLER
+          console.log('🔄 [SUBTITLES] Fallback: Simple yellow text...');
           
-          const cmd = ffmpeg(inputPath)
+          ffmpeg(inputPath)
             .outputOptions([
               '-c:v', 'libx264',
               '-c:a', 'copy',
-              '-preset', 'fast',  // Better quality for faceless
-              '-crf', '26',       // Higher quality
-              '-movflags', '+faststart'
+              '-preset', 'ultrafast',
+              '-crf', '30'
             ])
-            .videoFilters(drawTextFilters)
+            .videoFilters('drawtext=text=TEST:fontsize=100:fontcolor=yellow:x=100:y=100')
             .output(outputPath)
-            .on('start', (commandLine) => {
-              console.log('🚀 [SUBTITLES] Faceless video drawtext command started');
-            })
-            .on('progress', (progress) => {
-              if (progress.percent) {
-                console.log(`⚡ [SUBTITLES] Drawtext Progress: ${Math.round(progress.percent)}%`);
-              }
-            })
             .on('end', () => {
-              clearTimeout(timeout);
-              console.log('✅ [SUBTITLES] Faceless video drawtext subtitles completed successfully!');
-              success = true;
+              console.log('✅ [SUBTITLES] Simple fallback completed');
               resolve();
             })
-            .on('error', (err) => {
-              clearTimeout(timeout);
-              console.error('❌ [SUBTITLES] Drawtext failed:', err.message);
-              reject(err);
-            });
-          
-          cmd.run();
-        });
-        
-      } catch (drawtextError) {
-        console.log('⚠️ [SUBTITLES] Drawtext approach failed, trying simple fallback...');
-        
-        // APPROACH 3: Simple single subtitle (guaranteed to work)
-        try {
-          console.log('🔄 [SUBTITLES] Approach 3: Simple single subtitle...');
-          
-          const firstSub = subtitles[0];
-          const simpleText = firstSub.text.replace(/[^\w\s]/g, '').substring(0, 20);
-          
-          await new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => reject(new Error('Simple processing timeout')), 30000);
-            
-            ffmpeg(inputPath)
-              .outputOptions([
-                '-c:v', 'libx264',
-                '-c:a', 'copy',
-                '-preset', 'ultrafast',
-                '-crf', '30',
-                '-movflags', '+faststart'
-              ])
-              .videoFilters(`drawtext=text='${simpleText}':fontsize=28:fontcolor=yellow:x=(w-text_w)/2:y=h-60`)
-              .output(outputPath)
-              .on('start', () => {
-                console.log('🚀 [SUBTITLES] Simple command started');
-              })
-              .on('end', () => {
-                clearTimeout(timeout);
-                console.log('✅ [SUBTITLES] Simple subtitle completed!');
-                success = true;
+            .on('error', (fallbackErr) => {
+              console.error('❌ [SUBTITLES] Even fallback failed:', fallbackErr.message);
+              
+              // FINAL FALLBACK: Copy original
+              try {
+                fs.copyFileSync(inputPath, outputPath);
+                console.log('✅ [SUBTITLES] Copied original video');
                 resolve();
-              })
-              .on('error', (err) => {
-                clearTimeout(timeout);
-                console.error('❌ [SUBTITLES] Simple approach failed:', err.message);
-                reject(err);
-              })
-              .run();
-          });
-          
-        } catch (simpleError) {
-          console.log('⚠️ [SUBTITLES] All approaches failed, returning original video...');
-          
-          // APPROACH 4: Final fallback - copy original
-          fs.copyFileSync(inputPath, outputPath);
-          console.log('✅ [SUBTITLES] Original video copied as fallback');
-        }
-      }
-    }
+              } catch (copyErr) {
+                reject(copyErr);
+              }
+            })
+            .run();
+        })
+        .run();
+    });
     
-    // Check if output file exists and has content
-    if (!fs.existsSync(outputPath) || fs.statSync(outputPath).size === 0) {
-      console.log('⚠️ [SUBTITLES] Output file missing/empty, using input as output');
+    // Verify output file exists
+    if (!fs.existsSync(outputPath)) {
+      console.log('⚠️ [SUBTITLES] No output file - copying original');
       fs.copyFileSync(inputPath, outputPath);
     }
     
@@ -613,28 +506,21 @@ app.post('/api/add-subtitles', async (req, res) => {
     
     // Cleanup
     [inputPath, outputPath].forEach(file => {
-      try { 
-        if (fs.existsSync(file)) {
-          fs.unlinkSync(file); 
-        }
-      } catch (e) {
-        console.log(`Cleanup warning: ${e.message}`);
-      }
+      try { fs.unlinkSync(file); } catch (e) {}
     });
     
     const totalTime = Date.now() - startTime;
     
-    console.log(`🎉 [SUBTITLES] SUCCESS! Video processed with subtitles`);
+    console.log(`🎉 [SUBTITLES] TEST COMPLETE! Check for HUGE RED TEXT in center`);
     console.log(`📦 [SUBTITLES] Output: ${(outputBuffer.length / 1024).toFixed(2)} KB`);
     
     res.json({
       success: true,
-      message: `Video processed with ${subtitles.length} subtitles (${success ? 'subtitles added' : 'fallback mode'})`,
+      message: 'DEBUG TEST: Look for HUGE RED TEXT saying "SUBTITLE TEST" in center of video',
       videoData: `data:video/mp4;base64,${base64Video}`,
       size: outputBuffer.length,
-      subtitleCount: subtitles.length,
-      subtitlesRendered: success,
-      processingTimeMs: totalTime
+      processingTimeMs: totalTime,
+      testNote: 'HUGE RED TEXT with yellow background should be in center of screen - impossible to miss!'
     });
     
   } catch (error) {
@@ -645,16 +531,6 @@ app.post('/api/add-subtitles', async (req, res) => {
     });
   }
 });
-
-// Helper function to format time for SRT
-function formatSRTTime(seconds) {
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const secs = Math.floor(seconds % 60);
-  const ms = Math.floor((seconds % 1) * 1000);
-  
-  return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')},${ms.toString().padStart(3, '0')}`;
-}
 
 // Error handling middleware
 app.use((error, req, res, next) => {
