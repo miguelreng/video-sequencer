@@ -1,4 +1,21 @@
-const express = require('express');
+// Helper function to create SRT content
+function createSRTContent(subtitles) {
+  return subtitles.map((subtitle, index) => {
+    const startTime = formatSRTTime(subtitle.start);
+    const endTime = formatSRTTime(subtitle.end);
+    return `${index + 1}\n${startTime} --> ${endTime}\n${subtitle.text}\n`;
+  }).join('\n');
+}
+
+// Helper function to format SRT time
+function formatSRTTime(seconds) {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+  const milliseconds = Math.floor((seconds % 1) * 1000);
+  
+  return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')},${milliseconds.toString().padStart(3, '0')}`;
+}const express = require('express');
 const cors = require('cors');
 const ffmpeg = require('fluent-ffmpeg');
 const fetch = require('node-fetch');
@@ -382,59 +399,46 @@ app.post('/api/add-subtitles', async (req, res) => {
         .on('error', (err) => {
           console.error('❌ [SUBTITLES] ASS rendering failed:', err.message);
           
-          // FALLBACK: Use drawtext method for maximum compatibility
-          console.log('🔄 [SUBTITLES] Fallback: Using drawtext method...');
-          
-          // Build multiple drawtext filters
-          const textFilters = subtitles.map((subtitle, index) => {
-            // Clean text for drawtext (remove special characters that cause issues)
-            const cleanText = subtitle.text
-              .replace(/'/g, '')
-              .replace(/"/g, '')
-              .replace(/[\\:]/g, '')
-              .replace(/[^\w\s\u00C0-\u017F]/g, ''); // Keep alphanumeric and accented chars
-            
-            return `drawtext=text='${cleanText}':fontsize=28:fontcolor=white:borderw=3:bordercolor=black:x=(w-text_w)/2:y=h-120:enable='between(t,${subtitle.start},${subtitle.end})'`;
-          });
-          
-          const combinedFilter = textFilters.join(',');
+          // FALLBACK: Try SRT instead of ASS
+          console.log('🔄 [SUBTITLES] Fallback: Using SRT method...');
           
           ffmpeg(inputPath)
             .outputOptions([
               '-c:v', 'libx264',
               '-c:a', 'copy',
               '-preset', 'fast',
-              '-crf', '25',
-              '-vf', combinedFilter,
+              '-crf', '23',
+              // Try SRT with forced style
+              '-vf', `subtitles=${srtPath}:force_style='FontName=Arial,FontSize=32,PrimaryColour=&Hffffff,OutlineColour=&H000000,Outline=3'`,
               '-movflags', '+faststart',
               '-y'
             ])
             .output(outputPath)
             .on('end', () => {
-              console.log('✅ [SUBTITLES] Fallback drawtext completed');
+              console.log('✅ [SUBTITLES] SRT fallback completed');
               resolve();
             })
-            .on('error', (fallbackErr) => {
-              console.error('❌ [SUBTITLES] Drawtext fallback failed:', fallbackErr.message);
+            .on('error', (srtErr) => {
+              console.error('❌ [SUBTITLES] SRT fallback failed:', srtErr.message);
               
-              // FINAL FALLBACK: Single subtitle test
-              console.log('🔄 [SUBTITLES] Final fallback: single subtitle...');
+              // FINAL FALLBACK: Simple drawtext
+              console.log('🔄 [SUBTITLES] Final fallback: simple drawtext...');
               
-              const firstSub = subtitles[0];
-              const simpleText = firstSub.text.replace(/[^\w\s]/g, '');
+              // Use only the first subtitle to test
+              const testSub = subtitles[0];
               
               ffmpeg(inputPath)
                 .outputOptions([
                   '-c:v', 'libx264',
                   '-c:a', 'copy',
                   '-preset', 'ultrafast',
-                  '-crf', '30',
-                  '-vf', `drawtext=text='${simpleText}':fontsize=32:fontcolor=yellow:borderw=4:bordercolor=black:x=(w-text_w)/2:y=h-100`,
+                  '-crf', '28',
+                  '-vf', `drawtext=text='${testSub.text}':fontsize=40:fontcolor=yellow:borderw=4:bordercolor=red:x=(w-text_w)/2:y=h-150:enable='between(t,${testSub.start},${testSub.end})'`,
                   '-y'
                 ])
                 .output(outputPath)
                 .on('end', () => {
-                  console.log('✅ [SUBTITLES] Single subtitle test completed');
+                  console.log('✅ [SUBTITLES] Simple drawtext completed');
                   resolve();
                 })
                 .on('error', (finalErr) => {
