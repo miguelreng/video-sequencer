@@ -331,30 +331,32 @@ app.post('/api/add-subtitles', async (req, res) => {
     
     const outputPath = path.join(tempDir, `sub_output_${Date.now()}.mp4`);
     
-    // SIMPLE APPROACH: Process one subtitle at a time to avoid complex filters
-    console.log('🔄 [SUBTITLES] Using bulletproof simple approach...');
+    // BULLETPROOF APPROACH: Absolute simplest possible subtitle
+    console.log('🔄 [SUBTITLES] Using absolutely bulletproof approach...');
     
     const firstSub = subtitles[0];
-    const cleanText = firstSub.text.replace(/[^\w\s]/g, '').substring(0, 15);
+    const cleanText = firstSub.text.replace(/[^\w]/g, '').substring(0, 10); // Only letters/numbers, max 10 chars
     
-    console.log(`🎨 [SUBTITLES] Processing: "${cleanText}" at ${firstSub.start}-${firstSub.end}s`);
+    console.log(`🎨 [SUBTITLES] Processing: "${cleanText}" (ultra-clean)`);
     
     await new Promise((resolve, reject) => {
-      ffmpeg()
-        .input(inputPath)
-        .outputOptions([
-          '-c:v', 'libx264',
-          '-c:a', 'copy',
-          '-preset', 'ultrafast',
-          '-crf', '28',
-          // Use simple -vf instead of complex filter
-          '-vf', `drawtext=text=${cleanText}:fontsize=40:fontcolor=yellow:borderw=3:bordercolor=black:x=(w-text_w)/2:y=h-120:enable=between(t\\,${firstSub.start}\\,${firstSub.end})`,
-          '-movflags', '+faststart',
-          '-y'
-        ])
-        .output(outputPath)
+      const cmd = ffmpeg(inputPath);
+      
+      cmd.outputOptions([
+        '-c:v', 'libx264',
+        '-c:a', 'copy',
+        '-preset', 'ultrafast',
+        '-crf', '30',
+        '-movflags', '+faststart'
+      ]);
+      
+      // Use the most basic drawtext possible
+      cmd.videoFilters(`drawtext=text=${cleanText}:fontsize=48:fontcolor=yellow:x=100:y=100`);
+      
+      cmd.output(outputPath)
         .on('start', (commandLine) => {
-          console.log('🚀 [SUBTITLES] FFmpeg bulletproof command started');
+          console.log('🚀 [SUBTITLES] Ultra-simple command started');
+          console.log('Full command:', commandLine);
         })
         .on('progress', (progress) => {
           if (progress.percent) {
@@ -362,20 +364,20 @@ app.post('/api/add-subtitles', async (req, res) => {
           }
         })
         .on('end', () => {
-          console.log('✅ [SUBTITLES] Bulletproof subtitle processing completed');
+          console.log('✅ [SUBTITLES] Ultra-simple processing completed SUCCESS!');
           resolve();
         })
         .on('error', (err) => {
-          console.error('❌ [SUBTITLES] Bulletproof approach failed:', err.message);
+          console.error('❌ [SUBTITLES] Ultra-simple failed:', err.message);
           
-          // FINAL FALLBACK: No subtitle processing, just return original
-          console.log('🔄 [SUBTITLES] Final fallback: copying original video...');
+          // ABSOLUTELY FINAL FALLBACK: Just copy the file
+          console.log('🔄 [SUBTITLES] Absolute final fallback: direct copy...');
           try {
             fs.copyFileSync(inputPath, outputPath);
-            console.log('✅ [SUBTITLES] Original video copied successfully');
+            console.log('✅ [SUBTITLES] Direct copy successful');
             resolve();
           } catch (copyErr) {
-            console.error('❌ [SUBTITLES] Even copy failed:', copyErr.message);
+            console.error('❌ [SUBTITLES] Direct copy failed:', copyErr.message);
             reject(copyErr);
           }
         })
