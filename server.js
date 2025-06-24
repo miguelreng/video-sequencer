@@ -387,10 +387,10 @@ app.post('/api/add-audio', async (req, res) => {
   }
 });
 
-// ENDPOINT 3: ADD SUBTITLES (DEBUGGING VERSION - IMPOSSIBLE TO MISS)
+// ENDPOINT 3: DIAGNOSTIC TEST - CHECK WHAT'S ACTUALLY HAPPENING
 app.post('/api/add-subtitles', async (req, res) => {
   const startTime = Date.now();
-  console.log('📝 [SUBTITLES] DEBUGGING - IMPOSSIBLE TO MISS VERSION');
+  console.log('🔍 [SUBTITLES] DIAGNOSTIC TEST - INVESTIGATING THE ISSUE');
   
   try {
     const { video_url, subtitles } = req.body;
@@ -402,15 +402,7 @@ app.post('/api/add-subtitles', async (req, res) => {
       });
     }
     
-    if (!subtitles || !Array.isArray(subtitles) || subtitles.length === 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'subtitles array is required'
-      });
-    }
-    
     console.log(`📹 [SUBTITLES] Video: ${video_url}`);
-    console.log(`📝 [SUBTITLES] Creating IMPOSSIBLE TO MISS test subtitle`);
     
     const tempDir = '/tmp';
     
@@ -421,110 +413,163 @@ app.post('/api/add-subtitles', async (req, res) => {
     }
     
     const videoBuffer = await videoResponse.buffer();
-    const inputPath = path.join(tempDir, `sub_input_${Date.now()}.mp4`);
+    const inputPath = path.join(tempDir, `diagnostic_input_${Date.now()}.mp4`);
     fs.writeFileSync(inputPath, videoBuffer);
     console.log(`✅ [SUBTITLES] Video saved: ${(videoBuffer.length / 1024).toFixed(2)} KB`);
     
-    const outputPath = path.join(tempDir, `sub_output_${Date.now()}.mp4`);
-    
-    // APPROACH 1: HUGE RED TEXT IN CENTER (IMPOSSIBLE TO MISS)
-    console.log('🔴 [SUBTITLES] Creating HUGE RED TEXT in center of screen...');
+    // DIAGNOSTIC 1: Check input video properties
+    console.log('🔍 [DIAGNOSTIC] Checking input video properties...');
     
     await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('Processing timeout')), 45000);
+      ffmpeg.ffprobe(inputPath, (err, metadata) => {
+        if (err) {
+          console.error('❌ [DIAGNOSTIC] FFprobe failed:', err.message);
+          reject(err);
+        } else {
+          console.log('📊 [DIAGNOSTIC] Input video info:');
+          console.log(`   Duration: ${metadata.format.duration}s`);
+          console.log(`   Size: ${metadata.format.size} bytes`);
+          console.log(`   Format: ${metadata.format.format_name}`);
+          
+          if (metadata.streams && metadata.streams[0]) {
+            const videoStream = metadata.streams.find(s => s.codec_type === 'video');
+            if (videoStream) {
+              console.log(`   Video codec: ${videoStream.codec_name}`);
+              console.log(`   Resolution: ${videoStream.width}x${videoStream.height}`);
+              console.log(`   Frame rate: ${videoStream.r_frame_rate}`);
+            }
+          }
+          resolve();
+        }
+      });
+    });
+    
+    // DIAGNOSTIC 2: Test 1 - Simple overlay (no timing)
+    console.log('🧪 [DIAGNOSTIC] Test 1: Simple static overlay...');
+    const test1Path = path.join(tempDir, `test1_${Date.now()}.mp4`);
+    
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('Test 1 timeout')), 30000);
       
       ffmpeg(inputPath)
         .outputOptions([
           '-c:v', 'libx264',
           '-c:a', 'copy',
-          '-preset', 'fast',
-          '-crf', '25',
-          '-movflags', '+faststart'
+          '-preset', 'ultrafast',
+          '-crf', '30',
+          '-t', '5' // Only process first 5 seconds for speed
         ])
-        // HUGE RED TEXT IN CENTER - IMPOSSIBLE TO MISS
-        .videoFilters('drawtext=text=SUBTITLE TEST:fontsize=80:fontcolor=red:x=(w-text_w)/2:y=(h-text_h)/2:box=1:boxcolor=yellow@0.8:boxborderw=10')
-        .output(outputPath)
-        .on('start', (commandLine) => {
-          console.log('🚀 [SUBTITLES] HUGE RED TEXT command started');
-          console.log('Command:', commandLine);
-        })
-        .on('progress', (progress) => {
-          if (progress.percent) {
-            console.log(`⚡ [SUBTITLES] Progress: ${Math.round(progress.percent)}%`);
-          }
+        .videoFilters('drawtext=text=TEST1:fontsize=60:fontcolor=red:x=50:y=50')
+        .output(test1Path)
+        .on('start', () => {
+          console.log('🚀 [DIAGNOSTIC] Test 1 started');
         })
         .on('end', () => {
           clearTimeout(timeout);
-          console.log('✅ [SUBTITLES] HUGE RED TEXT completed - SHOULD BE IMPOSSIBLE TO MISS!');
+          console.log('✅ [DIAGNOSTIC] Test 1 completed');
           resolve();
         })
         .on('error', (err) => {
           clearTimeout(timeout);
-          console.error('❌ [SUBTITLES] HUGE RED TEXT failed:', err.message);
-          
-          // FALLBACK: EVEN SIMPLER
-          console.log('🔄 [SUBTITLES] Fallback: Simple yellow text...');
-          
-          ffmpeg(inputPath)
-            .outputOptions([
-              '-c:v', 'libx264',
-              '-c:a', 'copy',
-              '-preset', 'ultrafast',
-              '-crf', '30'
-            ])
-            .videoFilters('drawtext=text=TEST:fontsize=100:fontcolor=yellow:x=100:y=100')
-            .output(outputPath)
-            .on('end', () => {
-              console.log('✅ [SUBTITLES] Simple fallback completed');
-              resolve();
-            })
-            .on('error', (fallbackErr) => {
-              console.error('❌ [SUBTITLES] Even fallback failed:', fallbackErr.message);
-              
-              // FINAL FALLBACK: Copy original
-              try {
-                fs.copyFileSync(inputPath, outputPath);
-                console.log('✅ [SUBTITLES] Copied original video');
-                resolve();
-              } catch (copyErr) {
-                reject(copyErr);
-              }
-            })
-            .run();
+          console.error('❌ [DIAGNOSTIC] Test 1 failed:', err.message);
+          reject(err);
         })
         .run();
     });
     
-    // Verify output file exists
-    if (!fs.existsSync(outputPath)) {
-      console.log('⚠️ [SUBTITLES] No output file - copying original');
-      fs.copyFileSync(inputPath, outputPath);
+    // Check if test 1 file was created and is different
+    const test1Exists = fs.existsSync(test1Path);
+    const test1Size = test1Exists ? fs.statSync(test1Path).size : 0;
+    console.log(`📊 [DIAGNOSTIC] Test 1 result: File exists: ${test1Exists}, Size: ${test1Size} bytes`);
+    
+    // DIAGNOSTIC 3: Test 2 - Different approach
+    console.log('🧪 [DIAGNOSTIC] Test 2: Different drawtext syntax...');
+    const test2Path = path.join(tempDir, `test2_${Date.now()}.mp4`);
+    
+    try {
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('Test 2 timeout')), 30000);
+        
+        ffmpeg(inputPath)
+          .outputOptions([
+            '-c:v', 'libx264',
+            '-c:a', 'copy', 
+            '-vf', 'drawtext=text=TEST2:fontsize=80:fontcolor=yellow:x=100:y=100',
+            '-t', '5'
+          ])
+          .output(test2Path)
+          .on('start', () => {
+            console.log('🚀 [DIAGNOSTIC] Test 2 started');
+          })
+          .on('end', () => {
+            clearTimeout(timeout);
+            console.log('✅ [DIAGNOSTIC] Test 2 completed');
+            resolve();
+          })
+          .on('error', (err) => {
+            clearTimeout(timeout);
+            console.error('❌ [DIAGNOSTIC] Test 2 failed:', err.message);
+            reject(err);
+          })
+          .run();
+      });
+    } catch (test2Error) {
+      console.log('⚠️ [DIAGNOSTIC] Test 2 failed, continuing...');
     }
+    
+    const test2Exists = fs.existsSync(test2Path);
+    const test2Size = test2Exists ? fs.statSync(test2Path).size : 0;
+    console.log(`📊 [DIAGNOSTIC] Test 2 result: File exists: ${test2Exists}, Size: ${test2Size} bytes`);
+    
+    // Choose best test result or fallback to original
+    let outputPath = inputPath;
+    let testUsed = 'original';
+    
+    if (test1Exists && test1Size > 0) {
+      outputPath = test1Path;
+      testUsed = 'test1 (videoFilters)';
+    } else if (test2Exists && test2Size > 0) {
+      outputPath = test2Path;
+      testUsed = 'test2 (-vf option)';
+    }
+    
+    console.log(`📊 [DIAGNOSTIC] Using: ${testUsed}`);
     
     const outputBuffer = fs.readFileSync(outputPath);
     const base64Video = outputBuffer.toString('base64');
     
     // Cleanup
-    [inputPath, outputPath].forEach(file => {
-      try { fs.unlinkSync(file); } catch (e) {}
+    [inputPath, test1Path, test2Path].forEach(file => {
+      try { 
+        if (fs.existsSync(file)) {
+          fs.unlinkSync(file);
+        }
+      } catch (e) {}
     });
     
     const totalTime = Date.now() - startTime;
     
-    console.log(`🎉 [SUBTITLES] TEST COMPLETE! Check for HUGE RED TEXT in center`);
-    console.log(`📦 [SUBTITLES] Output: ${(outputBuffer.length / 1024).toFixed(2)} KB`);
+    console.log(`🔍 [DIAGNOSTIC] COMPLETE! Check the video carefully`);
+    console.log(`📊 [DIAGNOSTIC] Original size: ${videoBuffer.length}, Output size: ${outputBuffer.length}`);
+    console.log(`📊 [DIAGNOSTIC] Size difference: ${outputBuffer.length - videoBuffer.length} bytes`);
     
     res.json({
       success: true,
-      message: 'DEBUG TEST: Look for HUGE RED TEXT saying "SUBTITLE TEST" in center of video',
+      message: `DIAGNOSTIC TEST: ${testUsed} - Look for red "TEST1" or yellow "TEST2" text`,
       videoData: `data:video/mp4;base64,${base64Video}`,
       size: outputBuffer.length,
+      originalSize: videoBuffer.length,
+      sizeDifference: outputBuffer.length - videoBuffer.length,
+      testUsed: testUsed,
       processingTimeMs: totalTime,
-      testNote: 'HUGE RED TEXT with yellow background should be in center of screen - impossible to miss!'
+      diagnostic: {
+        test1: { exists: test1Exists, size: test1Size },
+        test2: { exists: test2Exists, size: test2Size }
+      }
     });
     
   } catch (error) {
-    console.error('💥 [SUBTITLES] Error:', error.message);
+    console.error('💥 [DIAGNOSTIC] Error:', error.message);
     res.status(500).json({
       success: false,
       error: error.message
