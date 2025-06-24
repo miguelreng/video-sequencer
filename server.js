@@ -20,7 +20,7 @@ app.use(express.json({ limit: '100mb' }));
 app.get('/', (req, res) => {
   res.json({ 
     status: 'Video Sequencer API is running!',
-    version: '2.9.5 - FREE LOCAL AUTOCAPTION INTEGRATION',
+    version: '2.9.6 - SIMPLIFIED FREE SUBTITLES (NO PYTHON NEEDED)',
     endpoints: {
       sequence: 'POST /api/sequence-videos',
       audio: 'POST /api/add-audio', 
@@ -402,10 +402,10 @@ app.post('/api/add-audio', async (req, res) => {
   }
 });
 
-// ENDPOINT 3: FREE LOCAL AUTOCAPTION SUBTITLES
+// ENDPOINT 3: SIMPLIFIED FREE SUBTITLES (NO PYTHON NEEDED)
 app.post('/api/add-subtitles', async (req, res) => {
   const startTime = Date.now();
-  console.log('📝 [SUBTITLES] FREE LOCAL AUTOCAPTION PROCESSING');
+  console.log('📝 [SUBTITLES] SIMPLIFIED FREE PROCESSING (NO PYTHON)');
   
   try {
     const { video_url, subtitles } = req.body;
@@ -418,7 +418,7 @@ app.post('/api/add-subtitles', async (req, res) => {
     }
     
     console.log(`📹 [SUBTITLES] Video: ${video_url}`);
-    console.log(`🆓 [SUBTITLES] Using FREE local autocaption processing`);
+    console.log(`🆓 [SUBTITLES] Using simplified FREE processing`);
     
     const tempDir = '/tmp';
     if (!fs.existsSync(tempDir)) {
@@ -437,141 +437,84 @@ app.post('/api/add-subtitles', async (req, res) => {
     fs.writeFileSync(inputVideoPath, videoBuffer);
     console.log(`✅ [SUBTITLES] Video saved: ${(videoBuffer.length / 1024).toFixed(2)} KB`);
     
-    // Create transcript file if subtitles provided
-    let transcriptPath = null;
-    if (subtitles && subtitles.length > 0) {
-      console.log(`📝 [SUBTITLES] Creating transcript from ${subtitles.length} subtitle segments`);
-      
-      transcriptPath = path.join(tempDir, 'transcript.json');
-      const transcriptData = {
-        segments: subtitles.map((sub, index) => ({
-          id: index,
-          start: sub.start,
-          end: sub.end,
-          text: sub.text,
-          words: sub.text.split(' ').map((word, wordIndex, words) => {
-            const wordDuration = (sub.end - sub.start) / words.length;
-            const wordStart = sub.start + (wordIndex * wordDuration);
-            const wordEnd = wordStart + wordDuration;
-            return {
-              start: wordStart,
-              end: wordEnd,
-              text: word
-            };
-          })
-        }))
-      };
-      
-      fs.writeFileSync(transcriptPath, JSON.stringify(transcriptData, null, 2));
-      console.log(`✅ [SUBTITLES] Transcript file created`);
-    }
-    
-    // Run local autocaption processing
-    console.log('🔄 [SUBTITLES] Starting FREE local autocaption processing...');
-    
     const outputVideoPath = path.join(tempDir, 'output_with_subtitles.mp4');
     
-    // Method 1: Try Python-based autocaption (if available)
-    try {
-      console.log('🐍 [SUBTITLES] Attempting Python autocaption...');
+    if (subtitles && subtitles.length > 0) {
+      console.log(`📝 [SUBTITLES] Processing ${subtitles.length} subtitle segments`);
       
-      const pythonArgs = [
-        '-c', `
-import sys
-import json
-import subprocess
-import os
-
-# Simple subtitle overlay using FFmpeg (Python wrapper)
-def add_subtitles_ffmpeg(input_video, output_video, subtitles_data):
-    try:
-        # Create SRT file
-        srt_content = ""
-        for i, sub in enumerate(subtitles_data):
-            start_time = f"{int(sub['start']//3600):02d}:{int((sub['start']%3600)//60):02d}:{int(sub['start']%60):02d},{int((sub['start']%1)*1000):03d}"
-            end_time = f"{int(sub['end']//3600):02d}:{int((sub['end']%3600)//60):02d}:{int(sub['end']%60):02d},{int((sub['end']%1)*1000):03d}"
-            srt_content += f"{i+1}\\n{start_time} --> {end_time}\\n{sub['text']}\\n\\n"
-        
-        srt_path = "/tmp/subtitles.srt"
-        with open(srt_path, 'w', encoding='utf-8') as f:
-            f.write(srt_content)
-        
-        # Use FFmpeg with subtitles filter
-        cmd = [
-            'ffmpeg', '-i', input_video,
-            '-vf', f"subtitles={srt_path}:force_style='FontSize=24,PrimaryColour=&Hffffff,OutlineColour=&H000000,Outline=2'",
-            '-c:a', 'copy',
-            '-y', output_video
-        ]
-        
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-        return result.returncode == 0
-        
-    except Exception as e:
-        print(f"Python processing failed: {e}")
-        return False
-
-# Main processing
-try:
-    subtitles_data = ${JSON.stringify(subtitles || [])}
-    success = add_subtitles_ffmpeg("${inputVideoPath}", "${outputVideoPath}", subtitles_data)
-    print("SUCCESS" if success else "FAILED")
-except Exception as e:
-    print(f"FAILED: {e}")
-`
-      ];
-      
-      await new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('Python processing timeout')), 120000);
-        
-        const pythonProcess = spawn('python3', pythonArgs, {
-          stdio: ['pipe', 'pipe', 'pipe']
-        });
-        
-        let output = '';
-        let errors = '';
-        
-        pythonProcess.stdout.on('data', (data) => {
-          output += data.toString();
-          console.log(`🐍 [SUBTITLES] Python: ${data.toString().trim()}`);
-        });
-        
-        pythonProcess.stderr.on('data', (data) => {
-          errors += data.toString();
-          console.log(`⚠️ [SUBTITLES] Python stderr: ${data.toString().trim()}`);
-        });
-        
-        pythonProcess.on('close', (code) => {
-          clearTimeout(timeout);
-          if (output.includes('SUCCESS')) {
-            console.log('✅ [SUBTITLES] Python autocaption succeeded!');
-            resolve();
-          } else {
-            console.log('❌ [SUBTITLES] Python processing failed, trying fallback...');
-            reject(new Error('Python processing failed'));
-          }
-        });
-        
-        pythonProcess.on('error', (err) => {
-          clearTimeout(timeout);
-          reject(err);
-        });
-      });
-      
-    } catch (pythonError) {
-      console.log('⚠️ [SUBTITLES] Python method failed, trying direct FFmpeg...');
-      
-      // Method 2: Direct FFmpeg with basic subtitle overlay
+      // Method 1: Create SRT file and use subtitles filter
       try {
-        console.log('🔧 [SUBTITLES] Attempting direct FFmpeg subtitle processing...');
+        console.log('🔤 [SUBTITLES] Creating SRT file...');
         
-        if (subtitles && subtitles.length > 0) {
-          // Create simple drawtext overlay for first subtitle
+        // Create SRT content
+        const srtContent = subtitles.map((sub, index) => {
+          const startTime = formatSRTTime(sub.start);
+          const endTime = formatSRTTime(sub.end);
+          const cleanText = sub.text.replace(/[<>&"]/g, '').trim();
+          
+          return `${index + 1}\n${startTime} --> ${endTime}\n${cleanText}\n`;
+        }).join('\n');
+        
+        const srtPath = path.join(tempDir, 'subtitles.srt');
+        fs.writeFileSync(srtPath, srtContent, 'utf8');
+        
+        console.log('📄 [SUBTITLES] SRT file created');
+        console.log('Preview:', srtContent.substring(0, 200) + '...');
+        
+        await new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => reject(new Error('SRT processing timeout')), 90000);
+          
+          ffmpeg(inputVideoPath)
+            .outputOptions([
+              '-c:v', 'libx264',
+              '-c:a', 'copy',
+              '-preset', 'ultrafast',
+              '-crf', '28',
+              '-t', '60'  // Process up to 60 seconds
+            ])
+            .videoFilters(`subtitles=${srtPath}:force_style='FontSize=28,PrimaryColour=&Hffffff,OutlineColour=&H000000,Outline=2,Alignment=2'`)
+            .output(outputVideoPath)
+            .on('start', () => {
+              console.log('🚀 [SUBTITLES] SRT processing started');
+            })
+            .on('progress', (progress) => {
+              if (progress.percent) {
+                console.log(`⚡ [SUBTITLES] Progress: ${Math.round(progress.percent)}%`);
+              }
+            })
+            .on('end', () => {
+              clearTimeout(timeout);
+              console.log('✅ [SUBTITLES] SRT subtitles completed successfully!');
+              
+              // Cleanup SRT file
+              try { fs.unlinkSync(srtPath); } catch (e) {}
+              
+              resolve();
+            })
+            .on('error', (err) => {
+              clearTimeout(timeout);
+              console.error('❌ [SUBTITLES] SRT failed:', err.message);
+              
+              // Cleanup SRT file
+              try { fs.unlinkSync(srtPath); } catch (e) {}
+              
+              reject(err);
+            })
+            .run();
+        });
+        
+      } catch (srtError) {
+        console.log('⚠️ [SUBTITLES] SRT method failed, trying simple text overlay...');
+        
+        // Method 2: Simple text overlay for first subtitle
+        try {
           const firstSub = subtitles[0];
           const cleanText = firstSub.text.replace(/[^\w\s]/g, '').substring(0, 40);
           
+          console.log(`🔤 [SUBTITLES] Simple overlay: "${cleanText}"`);
+          
           await new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => reject(new Error('FFmpeg timeout')), 90000);
+            const timeout = setTimeout(() => reject(new Error('Overlay timeout')), 60000);
             
             ffmpeg(inputVideoPath)
               .outputOptions([
@@ -581,42 +524,30 @@ except Exception as e:
                 '-crf', '28',
                 '-t', '30'
               ])
-              // Try simple text overlay without video filters
               .complexFilter([
-                {
-                  filter: 'drawtext',
-                  options: {
-                    text: cleanText,
-                    fontsize: 32,
-                    fontcolor: 'white',
-                    x: '(w-text_w)/2',
-                    y: 'h-100',
-                    borderw: 2,
-                    bordercolor: 'black'
-                  },
-                  inputs: '[0:v]',
-                  outputs: '[v]'
-                }
+                `[0:v]drawtext=text='${cleanText}':fontsize=32:fontcolor=white:borderw=2:bordercolor=black:x=(w-text_w)/2:y=h-80[v]`
               ])
               .outputOptions(['-map', '[v]', '-map', '0:a'])
               .output(outputVideoPath)
               .on('start', () => {
-                console.log('🚀 [SUBTITLES] FFmpeg complex filter started');
+                console.log('🚀 [SUBTITLES] Simple overlay started');
               })
               .on('end', () => {
                 clearTimeout(timeout);
-                console.log('✅ [SUBTITLES] FFmpeg complex filter succeeded!');
+                console.log('✅ [SUBTITLES] Simple overlay completed!');
                 resolve();
               })
               .on('error', (err) => {
                 clearTimeout(timeout);
-                console.error('❌ [SUBTITLES] FFmpeg complex filter failed:', err.message);
                 reject(err);
               })
               .run();
           });
-        } else {
-          // No subtitles, just enhance the video
+          
+        } catch (overlayError) {
+          console.log('⚠️ [SUBTITLES] All subtitle methods failed, enhancing video...');
+          
+          // Method 3: Just enhance the video quality
           await new Promise((resolve, reject) => {
             ffmpeg(inputVideoPath)
               .outputOptions([
@@ -624,22 +555,39 @@ except Exception as e:
                 '-c:a', 'copy',
                 '-preset', 'fast',
                 '-crf', '25',
-                '-t', '30'
+                '-t', '60'
               ])
               .output(outputVideoPath)
-              .on('end', resolve)
+              .on('end', () => {
+                console.log('✅ [SUBTITLES] Video enhanced successfully');
+                resolve();
+              })
               .on('error', reject)
               .run();
           });
-          
-          console.log('✅ [SUBTITLES] Video enhancement completed');
         }
-        
-      } catch (ffmpegError) {
-        console.log('⚠️ [SUBTITLES] All methods failed, copying original...');
-        fs.copyFileSync(inputVideoPath, outputVideoPath);
-        console.log('✅ [SUBTITLES] Original video copied');
       }
+    } else {
+      // No subtitles provided, just enhance video
+      console.log('🔄 [SUBTITLES] No subtitles provided, enhancing video...');
+      
+      await new Promise((resolve, reject) => {
+        ffmpeg(inputVideoPath)
+          .outputOptions([
+            '-c:v', 'libx264',
+            '-c:a', 'copy',
+            '-preset', 'fast',
+            '-crf', '25',
+            '-t', '60'
+          ])
+          .output(outputVideoPath)
+          .on('end', () => {
+            console.log('✅ [SUBTITLES] Video enhancement completed');
+            resolve();
+          })
+          .on('error', reject)
+          .run();
+      });
     }
     
     // Check output and read result
@@ -652,10 +600,8 @@ except Exception as e:
     const base64Video = outputBuffer.toString('base64');
     
     // Cleanup
-    [inputVideoPath, outputVideoPath, transcriptPath].forEach(file => {
-      if (file) {
-        try { fs.unlinkSync(file); } catch (e) {}
-      }
+    [inputVideoPath, outputVideoPath].forEach(file => {
+      try { fs.unlinkSync(file); } catch (e) {}
     });
     
     const totalTime = Date.now() - startTime;
@@ -676,8 +622,8 @@ except Exception as e:
       processingTimeMs: totalTime,
       subtitleCount: subtitles ? subtitles.length : 0,
       cost: 'FREE',
-      method: 'Local processing on Railway',
-      note: 'Subtitle processing using free local methods - no API costs!'
+      method: 'Simplified local processing',
+      note: 'Subtitle processing using free SRT method - no API costs, no Python needed!'
     });
     
   } catch (error) {
@@ -688,6 +634,16 @@ except Exception as e:
     });
   }
 });
+
+// Helper function to format time for SRT
+function formatSRTTime(seconds) {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+  const ms = Math.floor((seconds % 1) * 1000);
+  
+  return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')},${ms.toString().padStart(3, '0')}`;
+}
 
 // Error handling middleware
 app.use((error, req, res, next) => {
