@@ -463,10 +463,10 @@ app.post('/api/add-subtitles', async (req, res) => {
             '-c:a', 'copy',
             '-preset', 'fast', // Better quality for faceless videos
             '-crf', '25',      // Higher quality
-            // FACELESS VIDEO SUBTITLE STYLING
-            '-vf', `subtitles=${srtPath}:force_style='FontName=Arial Bold,FontSize=32,PrimaryColour=&Hffffff,SecondaryColour=&Hffffff,OutlineColour=&H000000,BackColour=&H80000000,Outline=3,Shadow=1,Alignment=2,MarginV=60'`,
             '-movflags', '+faststart'
           ])
+          // FIXED: Simplified SRT styling (the complex styling was causing syntax errors)
+          .videoFilters(`subtitles=${srtPath}:force_style='FontSize=28,PrimaryColour=&Hffffff,OutlineColour=&H000000,Outline=2,Alignment=2'`)
           .output(outputPath)
           .on('start', (commandLine) => {
             console.log('🚀 [SUBTITLES] SRT command started for faceless video');
@@ -505,12 +505,12 @@ app.post('/api/add-subtitles', async (req, res) => {
       try {
         console.log('🔄 [SUBTITLES] Approach 2: Faceless video drawtext filters...');
         
-        const drawTextFilters = subtitles.slice(0, 8).map((sub, index) => { // Limit to 8 for stability
-          const cleanText = sub.text.replace(/[^\w\s.,!?]/g, '').substring(0, 50); // Keep punctuation, longer text
-          const escapedText = cleanText.replace(/'/g, "\\\\'").replace(/:/g, "\\\\:");
+        const drawTextFilters = subtitles.slice(0, 3).map((sub, index) => { // Start with just 3 for testing
+          const cleanText = sub.text.replace(/[^\w\s.,!?]/g, '').substring(0, 40); // Keep punctuation, shorter text
+          const escapedText = cleanText.replace(/'/g, '').replace(/:/g, ''); // Remove problematic characters
           
-          // FACELESS VIDEO STYLING: Larger, more prominent
-          return `drawtext=text='${escapedText}':fontfile=/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf:fontsize=36:fontcolor=white:borderw=3:bordercolor=black:x=(w-text_w)/2:y=h-120:enable='between(t,${sub.start},${sub.end})'`;
+          // SIMPLIFIED FACELESS VIDEO STYLING
+          return `drawtext=text='${escapedText}':fontsize=32:fontcolor=white:borderw=2:bordercolor=black:x=(w-text_w)/2:y=h-80:enable='between(t,${sub.start},${sub.end})'`;
         });
         
         console.log(`🎨 [SUBTITLES] Created ${drawTextFilters.length} faceless video drawtext filters`);
@@ -560,7 +560,7 @@ app.post('/api/add-subtitles', async (req, res) => {
           console.log('🔄 [SUBTITLES] Approach 3: Simple single subtitle...');
           
           const firstSub = subtitles[0];
-          const simpleText = firstSub.text.replace(/[^\w]/g, '').substring(0, 15);
+          const simpleText = firstSub.text.replace(/[^\w\s]/g, '').substring(0, 20);
           
           await new Promise((resolve, reject) => {
             const timeout = setTimeout(() => reject(new Error('Simple processing timeout')), 30000);
@@ -573,7 +573,7 @@ app.post('/api/add-subtitles', async (req, res) => {
                 '-crf', '30',
                 '-movflags', '+faststart'
               ])
-              .videoFilters(`drawtext=text=${simpleText}:fontsize=36:fontcolor=yellow:x=50:y=50`)
+              .videoFilters(`drawtext=text='${simpleText}':fontsize=28:fontcolor=yellow:x=(w-text_w)/2:y=h-60`)
               .output(outputPath)
               .on('start', () => {
                 console.log('🚀 [SUBTITLES] Simple command started');
@@ -586,6 +586,7 @@ app.post('/api/add-subtitles', async (req, res) => {
               })
               .on('error', (err) => {
                 clearTimeout(timeout);
+                console.error('❌ [SUBTITLES] Simple approach failed:', err.message);
                 reject(err);
               })
               .run();
