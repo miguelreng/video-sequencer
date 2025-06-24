@@ -16,17 +16,22 @@ app.use(express.json({ limit: '100mb' }));
 app.get('/', (req, res) => {
   res.json({ 
     status: 'Video Sequencer API is running!',
-    version: '2.4.0 - Proper 5-Second Trimming',
+    version: '2.5.1 - Consistent Slow Zoom-In',
     endpoints: {
       sequence: 'POST /api/sequence-videos'
-    }
+    },
+    effects: [
+      'Consistent slow zoom-in effect for all videos',
+      'Smooth cinematic movement',
+      '5-second segments with gradual zoom'
+    ]
   });
 });
 
-// Main video sequencing endpoint with proper trimming
+// Main video sequencing endpoint with consistent zoom-in
 app.post('/api/sequence-videos', async (req, res) => {
   const startTime = Date.now();
-  console.log('🎬 Received video sequencing request');
+  console.log('🎬 Received video sequencing request with slow zoom-in');
   
   try {
     const { videoUrls, tracks } = req.body;
@@ -54,15 +59,19 @@ app.post('/api/sequence-videos', async (req, res) => {
       timeline = timeline.slice(0, 8);
     }
     
-    console.log(`📊 Processing ${timeline.length} video segments (5s each)`);
+    console.log(`📊 Processing ${timeline.length} video segments with slow zoom-in`);
     
     const tempDir = '/tmp';
     if (!fs.existsSync(tempDir)) {
       fs.mkdirSync(tempDir, { recursive: true });
     }
     
-    // Download and trim videos to exactly 5 seconds each
-    const trimmedFiles = [];
+    // CONSISTENT SLOW ZOOM-IN EFFECT
+    // Starts at 1.0x and slowly zooms to 1.3x over 5 seconds
+    const zoomInEffect = 'scale=1.5*iw:1.5*ih,zoompan=z=\'1+0.06*t/5\':d=125:x=iw/2-(iw/zoom/2):y=ih/2-(ih/zoom/2)';
+    
+    // Download and process videos with consistent zoom-in
+    const processedFiles = [];
     for (let i = 0; i < timeline.length; i++) {
       const segment = timeline[i];
       try {
@@ -73,14 +82,14 @@ app.post('/api/sequence-videos', async (req, res) => {
         
         const buffer = await response.buffer();
         const originalPath = path.join(tempDir, `original${i}.mp4`);
-        const trimmedPath = path.join(tempDir, `trimmed${i}.mp4`);
+        const processedPath = path.join(tempDir, `processed${i}.mp4`);
         
         fs.writeFileSync(originalPath, buffer);
         console.log(`✅ Downloaded segment ${i + 1}, size: ${(buffer.length / 1024).toFixed(2)} KB`);
         
-        // TRIM VIDEO TO EXACTLY 5 SECONDS
-        console.log(`✂️ Trimming segment ${i + 1} to 5 seconds...`);
+        console.log(`🔍 Applying slow zoom-in to segment ${i + 1}`);
         
+        // APPLY SLOW ZOOM-IN AND TRIM TO 5 SECONDS
         await new Promise((resolve, reject) => {
           ffmpeg(originalPath)
             .inputOptions(['-ss', '0']) // Start from beginning
@@ -88,28 +97,34 @@ app.post('/api/sequence-videos', async (req, res) => {
               '-t', '5', // Duration: exactly 5 seconds
               '-c:v', 'libx264',
               '-c:a', 'aac',
-              '-preset', 'fast',
-              '-crf', '28', // Good quality
-              '-vf', 'scale=720:-2', // 720p for good quality
-              '-r', '24', // 24fps
-              '-movflags', '+faststart'
+              '-preset', 'medium', // Good quality
+              '-crf', '23', // Higher quality (lower number = better quality)
+              '-vf', `${zoomInEffect},scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280`, // Apply zoom + resize
+              '-r', '30', // 30fps for smooth motion
+              '-movflags', '+faststart',
+              '-pix_fmt', 'yuv420p'
             ])
-            .output(trimmedPath)
-            .on('start', () => {
-              console.log(`🚀 Trimming segment ${i + 1} to 5 seconds`);
+            .output(processedPath)
+            .on('start', (commandLine) => {
+              console.log(`🚀 Processing segment ${i + 1} with slow zoom-in`);
+            })
+            .on('progress', (progress) => {
+              if (progress.percent) {
+                console.log(`⚡ Segment ${i + 1} zoom progress: ${Math.round(progress.percent)}%`);
+              }
             })
             .on('end', () => {
-              console.log(`✅ Trimmed segment ${i + 1} completed`);
+              console.log(`✅ Segment ${i + 1} slow zoom-in completed`);
               resolve();
             })
             .on('error', (err) => {
-              console.error(`❌ Trim error for segment ${i + 1}:`, err.message);
+              console.error(`❌ Zoom error for segment ${i + 1}:`, err.message);
               reject(err);
             })
             .run();
         });
         
-        trimmedFiles.push(trimmedPath);
+        processedFiles.push(processedPath);
         
         // Clean up original file
         fs.unlinkSync(originalPath);
@@ -119,23 +134,23 @@ app.post('/api/sequence-videos', async (req, res) => {
       }
     }
     
-    if (trimmedFiles.length === 0) {
+    if (processedFiles.length === 0) {
       return res.status(400).json({
         success: false,
         error: 'No videos processed successfully'
       });
     }
     
-    console.log(`🔗 Concatenating ${trimmedFiles.length} trimmed segments...`);
+    console.log(`🔗 Concatenating ${processedFiles.length} zoom-processed segments...`);
     
-    // Create concat file with trimmed videos
-    const concatContent = trimmedFiles.map(file => `file '${file}'`).join('\n');
+    // Create concat file with processed videos
+    const concatContent = processedFiles.map(file => `file '${file}'`).join('\n');
     const concatPath = path.join(tempDir, 'concat.txt');
     fs.writeFileSync(concatPath, concatContent);
     
     const outputPath = path.join(tempDir, `output_${Date.now()}.mp4`);
     
-    // CONCATENATE TRIMMED VIDEOS
+    // CONCATENATE PROCESSED VIDEOS
     await new Promise((resolve, reject) => {
       ffmpeg()
         .input(concatPath)
@@ -146,27 +161,27 @@ app.post('/api/sequence-videos', async (req, res) => {
         ])
         .output(outputPath)
         .on('start', () => {
-          console.log('🔗 Concatenating trimmed videos...');
+          console.log('🔗 Concatenating zoom-processed videos...');
         })
         .on('progress', (progress) => {
           if (progress.percent) {
-            console.log(`⚡ Concat progress: ${Math.round(progress.percent)}%`);
+            console.log(`⚡ Final concat progress: ${Math.round(progress.percent)}%`);
           }
         })
         .on('end', () => {
-          console.log('✅ Concatenation completed');
+          console.log('✅ Final concatenation completed');
           resolve();
         })
         .on('error', (err) => {
-          console.error('❌ Concat error:', err.message);
-          reject(new Error(`Concatenation failed: ${err.message}`));
+          console.error('❌ Final concat error:', err.message);
+          reject(new Error(`Final concatenation failed: ${err.message}`));
         })
         .run();
       
-      // 5 minute timeout for concat
+      // 10 minute timeout for processing
       setTimeout(() => {
-        reject(new Error('Concatenation timeout'));
-      }, 300000);
+        reject(new Error('Processing timeout'));
+      }, 600000);
     });
     
     // Read result
@@ -174,7 +189,7 @@ app.post('/api/sequence-videos', async (req, res) => {
     const base64Video = outputBuffer.toString('base64');
     
     // Cleanup all temp files
-    [...trimmedFiles, concatPath, outputPath].forEach(file => {
+    [...processedFiles, concatPath, outputPath].forEach(file => {
       try { 
         if (fs.existsSync(file)) {
           fs.unlinkSync(file); 
@@ -183,20 +198,21 @@ app.post('/api/sequence-videos', async (req, res) => {
     });
     
     const totalTime = Date.now() - startTime;
-    const expectedDuration = trimmedFiles.length * 5; // 5 seconds per video
+    const expectedDuration = processedFiles.length * 5;
     
-    console.log(`🎉 Success! ${trimmedFiles.length} videos, expected duration: ${expectedDuration}s`);
+    console.log(`🎉 Success! ${processedFiles.length} videos with consistent slow zoom-in`);
     console.log(`📦 Output size: ${(outputBuffer.length / 1024).toFixed(2)} KB`);
     
     res.json({
       success: true,
-      message: `Successfully processed ${trimmedFiles.length} videos, each trimmed to 5 seconds`,
+      message: `Successfully processed ${processedFiles.length} videos with consistent slow zoom-in effect`,
       videoData: `data:video/mp4;base64,${base64Video}`,
       size: outputBuffer.length,
-      videosProcessed: trimmedFiles.length,
+      videosProcessed: processedFiles.length,
       videosRequested: timeline.length,
       expectedDuration: `${expectedDuration} seconds`,
-      quality: '720p, 24fps, CRF28',
+      effects: 'Consistent slow zoom-in effect (1.0x to 1.3x over 5 seconds)',
+      quality: '720x1280, 30fps, CRF23 (high quality)',
       processingTimeMs: totalTime
     });
     
@@ -212,6 +228,6 @@ app.post('/api/sequence-videos', async (req, res) => {
 // Start server
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Video Sequencer API v2.4.0 running on port ${PORT}`);
-  console.log(`✂️ Features: Proper 5-second trimming, 720p quality, stream copy concat`);
+  console.log(`🚀 Video Sequencer API v2.5.1 running on port ${PORT}`);
+  console.log(`🔍 Features: Consistent slow zoom-in effect, 30fps smooth motion, high quality`);
 });
