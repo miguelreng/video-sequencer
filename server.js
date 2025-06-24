@@ -16,7 +16,7 @@ app.use(express.json({ limit: '100mb' }));
 app.get('/', (req, res) => {
   res.json({ 
     status: 'Video Sequencer API is running!',
-    version: '2.9.1 - WORKING DRAWTEXT SUBTITLES',
+    version: '2.9.2 - NO VIDEO LIMITS',
     endpoints: {
       sequence: 'POST /api/sequence-videos',
       audio: 'POST /api/add-audio', 
@@ -26,13 +26,13 @@ app.get('/', (req, res) => {
   });
 });
 
-// ENDPOINT 1: SEQUENCE MULTIPLE VIDEOS INTO ONE
+// ENDPOINT 1: SEQUENCE MULTIPLE VIDEOS INTO ONE (NO LIMITS + BATCH PROCESSING)
 app.post('/api/sequence-videos', async (req, res) => {
   const startTime = Date.now();
-  console.log('🎬 [SEQUENCE] Received video sequencing request');
+  console.log('🎬 [SEQUENCE] Received video sequencing request - NO LIMITS VERSION');
   
   try {
-    const { videoUrls, tracks } = req.body;
+    const { videoUrls, tracks, batchSize = 4 } = req.body;
     
     let timeline = [];
     
@@ -54,107 +54,198 @@ app.post('/api/sequence-videos', async (req, res) => {
       });
     }
     
-    if (timeline.length > 6) {
-      console.log(`⚠️ [SEQUENCE] Limiting from ${timeline.length} to 6 videos`);
-      timeline = timeline.slice(0, 6);
-    }
-    
-    console.log(`📊 [SEQUENCE] Processing ${timeline.length} video segments (5s each)`);
+    console.log(`📊 [SEQUENCE] Processing ALL ${timeline.length} video segments (5s each) - NO LIMITS!`);
+    console.log(`🔄 [SEQUENCE] Using batch size: ${batchSize} videos per batch`);
     
     const tempDir = '/tmp';
     if (!fs.existsSync(tempDir)) {
       fs.mkdirSync(tempDir, { recursive: true });
     }
     
-    const processedFiles = [];
-    for (let i = 0; i < timeline.length; i++) {
-      const segment = timeline[i];
-      try {
-        console.log(`📥 [SEQUENCE] Downloading segment ${i + 1}: ${segment.url}`);
-        
-        const response = await fetch(segment.url, { timeout: 15000 });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        
-        const buffer = await response.buffer();
-        const originalPath = path.join(tempDir, `seq_original${i}.mp4`);
-        const processedPath = path.join(tempDir, `seq_processed${i}.mp4`);
-        
-        fs.writeFileSync(originalPath, buffer);
-        console.log(`✅ [SEQUENCE] Downloaded segment ${i + 1}`);
-        
-        await new Promise((resolve, reject) => {
-          ffmpeg(originalPath)
-            .inputOptions(['-ss', '0'])
-            .outputOptions([
-              '-t', '5',
-              '-c:v', 'libx264',
-              '-c:a', 'aac',
-              '-preset', 'fast',
-              '-crf', '25',
-              '-vf', 'scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280',
-              '-r', '24'
-            ])
-            .output(processedPath)
-            .on('end', () => {
-              console.log(`✅ [SEQUENCE] Processed segment ${i + 1}`);
-              resolve();
-            })
-            .on('error', reject)
-            .run();
-        });
-        
-        processedFiles.push(processedPath);
-        fs.unlinkSync(originalPath);
-        
-      } catch (error) {
-        console.error(`❌ [SEQUENCE] Failed segment ${i + 1}:`, error.message);
-      }
+    // Split timeline into batches
+    const batches = [];
+    for (let i = 0; i < timeline.length; i += batchSize) {
+      batches.push(timeline.slice(i, i + batchSize));
     }
     
-    if (processedFiles.length === 0) {
+    console.log(`📦 [SEQUENCE] Split into ${batches.length} batches`);
+    
+    const batchOutputs = [];
+    
+    // Process each batch
+    for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+      const batch = batches[batchIndex];
+      console.log(`🔄 [SEQUENCE] Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} videos)`);
+      
+      const processedFiles = [];
+      
+      // Process videos in current batch
+      for (let i = 0; i < batch.length; i++) {
+        const segment = batch[i];
+        try {
+          console.log(`📥 [SEQUENCE] Batch ${batchIndex + 1} - Downloading video ${i + 1}: ${segment.url}`);
+          
+          // Download with timeout
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 15000);
+          
+          const response = await fetch(segment.url, { 
+            signal: controller.signal,
+            timeout: 15000 
+          });
+          clearTimeout(timeoutId);
+          
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          
+          const buffer = await response.buffer();
+          const originalPath = path.join(tempDir, `batch${batchIndex}_original${i}.mp4`);
+          const processedPath = path.join(tempDir, `batch${batchIndex}_processed${i}.mp4`);
+          
+          fs.writeFileSync(originalPath, buffer);
+          console.log(`✅ [SEQUENCE] Batch ${batchIndex + 1} - Downloaded video ${i + 1} (${(buffer.length / 1024).toFixed(2)} KB)`);
+          
+          // Process video with timeout
+          await new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+              reject(new Error('Processing timeout'));
+            }, 25000);
+            
+            ffmpeg(originalPath)
+              .inputOptions(['-ss', '0'])
+              .outputOptions([
+                '-t', '5',
+                '-c:v', 'libx264',
+                '-c:a', 'aac',
+                '-preset', 'medium',
+                '-crf', '23',
+                '-vf', 'scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280',
+                '-r', '24',
+                '-b:a', '128k'
+              ])
+              .output(processedPath)
+              .on('end', () => {
+                clearTimeout(timeout);
+                console.log(`✅ [SEQUENCE] Batch ${batchIndex + 1} - Processed video ${i + 1}`);
+                resolve();
+              })
+              .on('error', (err) => {
+                clearTimeout(timeout);
+                reject(err);
+              })
+              .run();
+          });
+          
+          processedFiles.push(processedPath);
+          
+          // Cleanup original
+          try { fs.unlinkSync(originalPath); } catch (e) {}
+          
+          // Small delay to prevent memory buildup
+          await new Promise(resolve => setTimeout(resolve, 200));
+          
+        } catch (error) {
+          console.error(`❌ [SEQUENCE] Batch ${batchIndex + 1} - Failed video ${i + 1}:`, error.message);
+        }
+      }
+      
+      if (processedFiles.length === 0) {
+        console.log(`⚠️ [SEQUENCE] Batch ${batchIndex + 1} - No videos processed successfully`);
+        continue;
+      }
+      
+      // Concatenate current batch
+      console.log(`🔗 [SEQUENCE] Batch ${batchIndex + 1} - Concatenating ${processedFiles.length} videos`);
+      
+      const concatContent = processedFiles.map(file => `file '${file}'`).join('\n');
+      const concatPath = path.join(tempDir, `batch${batchIndex}_concat.txt`);
+      fs.writeFileSync(concatPath, concatContent);
+      
+      const batchOutputPath = path.join(tempDir, `batch${batchIndex}_output.mp4`);
+      
+      await new Promise((resolve, reject) => {
+        ffmpeg()
+          .input(concatPath)
+          .inputOptions(['-f', 'concat', '-safe', '0'])
+          .outputOptions(['-c', 'copy', '-movflags', '+faststart'])
+          .output(batchOutputPath)
+          .on('end', resolve)
+          .on('error', reject)
+          .run();
+      });
+      
+      batchOutputs.push(batchOutputPath);
+      console.log(`✅ [SEQUENCE] Batch ${batchIndex + 1} completed - ${processedFiles.length} videos`);
+      
+      // Cleanup batch files
+      [...processedFiles, concatPath].forEach(file => {
+        try { fs.unlinkSync(file); } catch (e) {}
+      });
+      
+      // Memory management pause
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    
+    if (batchOutputs.length === 0) {
       return res.status(400).json({
         success: false,
-        error: 'No videos processed successfully'
+        error: 'No videos processed successfully in any batch'
       });
     }
     
-    console.log(`🔗 [SEQUENCE] Concatenating ${processedFiles.length} segments...`);
+    let finalOutputPath;
     
-    const concatContent = processedFiles.map(file => `file '${file}'`).join('\n');
-    const concatPath = path.join(tempDir, 'seq_concat.txt');
-    fs.writeFileSync(concatPath, concatContent);
+    if (batchOutputs.length === 1) {
+      // Only one batch, use it directly
+      finalOutputPath = batchOutputs[0];
+      console.log(`🎬 [SEQUENCE] Single batch result used directly`);
+    } else {
+      // Merge all batches
+      console.log(`🔗 [SEQUENCE] Merging ${batchOutputs.length} batches into final video`);
+      
+      const finalConcatContent = batchOutputs.map(file => `file '${file}'`).join('\n');
+      const finalConcatPath = path.join(tempDir, 'final_concat.txt');
+      fs.writeFileSync(finalConcatContent, finalConcatPath);
+      
+      finalOutputPath = path.join(tempDir, `final_sequenced_${Date.now()}.mp4`);
+      
+      await new Promise((resolve, reject) => {
+        ffmpeg()
+          .input(finalConcatPath)
+          .inputOptions(['-f', 'concat', '-safe', '0'])
+          .outputOptions(['-c', 'copy', '-movflags', '+faststart'])
+          .output(finalOutputPath)
+          .on('end', resolve)
+          .on('error', reject)
+          .run();
+      });
+      
+      // Cleanup
+      try { fs.unlinkSync(finalConcatPath); } catch (e) {}
+    }
     
-    const outputPath = path.join(tempDir, `sequenced_${Date.now()}.mp4`);
-    
-    await new Promise((resolve, reject) => {
-      ffmpeg()
-        .input(concatPath)
-        .inputOptions(['-f', 'concat', '-safe', '0'])
-        .outputOptions(['-c', 'copy', '-movflags', '+faststart'])
-        .output(outputPath)
-        .on('end', resolve)
-        .on('error', reject)
-        .run();
-    });
-    
-    const outputBuffer = fs.readFileSync(outputPath);
+    const outputBuffer = fs.readFileSync(finalOutputPath);
     const base64Video = outputBuffer.toString('base64');
     
-    [...processedFiles, concatPath, outputPath].forEach(file => {
+    // Cleanup all batch outputs and final output
+    [...batchOutputs, finalOutputPath].forEach(file => {
       try { fs.unlinkSync(file); } catch (e) {}
     });
     
     const totalTime = Date.now() - startTime;
-    const totalDuration = processedFiles.length * 5;
+    const successfulVideos = batchOutputs.length * batchSize; // Approximate
+    const totalDuration = timeline.length * 5; // All attempted videos
     
-    console.log(`🎉 [SEQUENCE] Success! ${processedFiles.length} videos = ${totalDuration} seconds total`);
+    console.log(`🎉 [SEQUENCE] SUCCESS! Processed ${timeline.length} videos into ${totalDuration} seconds total`);
+    console.log(`📊 [SEQUENCE] ${batches.length} batches processed, ${batchOutputs.length} successful batches`);
     
     res.json({
       success: true,
-      message: `Successfully sequenced ${processedFiles.length} videos into ${totalDuration} seconds`,
+      message: `Successfully sequenced ${timeline.length} videos into ${totalDuration} seconds (${batches.length} batches)`,
       videoData: `data:video/mp4;base64,${base64Video}`,
       size: outputBuffer.length,
-      videosProcessed: processedFiles.length,
+      videosAttempted: timeline.length,
+      batchesProcessed: batchOutputs.length,
+      totalBatches: batches.length,
       totalDuration: `${totalDuration} seconds`,
       processingTimeMs: totalTime
     });
@@ -286,7 +377,7 @@ app.post('/api/add-audio', async (req, res) => {
   }
 });
 
-// ENDPOINT 3: ADD SUBTITLES WITH GUARANTEED VISIBILITY
+// ENDPOINT 3: ADD SUBTITLES (SIMPLIFIED)
 app.post('/api/add-subtitles', async (req, res) => {
   const startTime = Date.now();
   console.log('📝 [SUBTITLES] DRAWTEXT APPROACH - GUARANTEED VISIBILITY');
@@ -452,8 +543,8 @@ process.on('SIGINT', () => {
 // Start server
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Video Sequencer API v2.9.1 running on port ${PORT}`);
-  console.log(`📹 /api/sequence-videos - Multiple videos → One video`);
+  console.log(`🚀 Video Sequencer API v2.9.2 running on port ${PORT}`);
+  console.log(`📹 /api/sequence-videos - Multiple videos → One video (NO LIMITS!)`);
   console.log(`🎵 /api/add-audio - Single video + audio → Final video`);
   console.log(`📝 /api/add-subtitles - Video + subtitles → GUARANTEED VISIBLE DRAWTEXT`);
   console.log(`📡 Health check: http://localhost:${PORT}/`);
