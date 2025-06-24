@@ -16,7 +16,7 @@ app.use(express.json({ limit: '100mb' }));
 app.get('/', (req, res) => {
   res.json({ 
     status: 'Video Sequencer API is running!',
-    version: '2.7.0 - Separate Video Sequencing & Audio Overlay',
+    version: '2.7.1 - Fixed Audio File Writing',
     endpoints: {
       sequence: 'POST /api/sequence-videos (multiple videos → one video)',
       audio: 'POST /api/add-audio (single video + audio → final video)'
@@ -173,7 +173,7 @@ app.post('/api/sequence-videos', async (req, res) => {
   }
 });
 
-// ENDPOINT 2: ADD AUDIO TO SINGLE VIDEO
+// ENDPOINT 2: ADD AUDIO TO SINGLE VIDEO (FIXED)
 app.post('/api/add-audio', async (req, res) => {
   const startTime = Date.now();
   console.log('🎵 Received audio overlay request (video + audio → final)');
@@ -210,6 +210,9 @@ app.post('/api/add-audio', async (req, res) => {
     console.log(`🎵 Audio: ${audioTrack.url}, Duration: ${audioTrack.duration}s`);
     
     const tempDir = '/tmp';
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir, { recursive: true });
+    }
     
     // Download video
     console.log('📥 Downloading video...');
@@ -219,8 +222,9 @@ app.post('/api/add-audio', async (req, res) => {
     }
     
     const videoBuffer = await videoResponse.buffer();
-    const videoPath = path.join(tempDir, 'input_video.mp4');
-    fs.writeFileSync(videoPath, videoBuffer);
+    const videoPath = path.join(tempDir, `input_video_${Date.now()}.mp4`);
+    fs.writeFileSync(videoPath, videoBuffer); // FIXED: Correct order
+    console.log(`✅ Video saved: ${(videoBuffer.length / 1024).toFixed(2)} KB`);
     
     // Download audio
     console.log('📥 Downloading audio...');
@@ -230,12 +234,13 @@ app.post('/api/add-audio', async (req, res) => {
     }
     
     const audioBuffer = await audioResponse.buffer();
-    const audioPath = path.join(tempDir, 'input_audio.mp3');
-    fs.writeFileSync(audioBuffer, audioPath);
+    const audioPath = path.join(tempDir, `input_audio_${Date.now()}.mp3`);
+    fs.writeFileSync(audioPath, audioBuffer); // FIXED: Correct order (path, buffer)
+    console.log(`✅ Audio saved: ${(audioBuffer.length / 1024).toFixed(2)} KB`);
     
     // Combine video + audio
     const outputPath = path.join(tempDir, `final_${Date.now()}.mp4`);
-    const duration = Math.min(videoTrack.duration, audioTrack.duration);
+    const duration = Math.min(videoTrack.duration || 60, audioTrack.duration || 60);
     
     console.log(`🔄 Combining video + audio (${duration}s)...`);
     
@@ -246,14 +251,21 @@ app.post('/api/add-audio', async (req, res) => {
           '-t', duration.toString(),
           '-c:v', 'copy', // Copy video (no re-encoding)
           '-c:a', 'aac',  // Re-encode audio
+          '-b:a', '128k', // Audio bitrate
           '-map', '0:v:0', // Video from first input
           '-map', '1:a:0', // Audio from second input
           '-shortest',
           '-movflags', '+faststart'
         ])
         .output(outputPath)
-        .on('start', () => {
+        .on('start', (commandLine) => {
           console.log('🚀 FFmpeg combining video + audio...');
+          console.log('Command:', commandLine);
+        })
+        .on('progress', (progress) => {
+          if (progress.percent) {
+            console.log(`⚡ Combining progress: ${Math.round(progress.percent)}%`);
+          }
         })
         .on('end', () => {
           console.log('✅ Video + audio combination completed');
@@ -272,12 +284,19 @@ app.post('/api/add-audio', async (req, res) => {
     
     // Cleanup
     [videoPath, audioPath, outputPath].forEach(file => {
-      try { fs.unlinkSync(file); } catch (e) {}
+      try { 
+        if (fs.existsSync(file)) {
+          fs.unlinkSync(file); 
+        }
+      } catch (e) {
+        console.warn('Cleanup warning:', e.message);
+      }
     });
     
     const totalTime = Date.now() - startTime;
     
     console.log(`🎉 Final video with audio created (${duration}s)`);
+    console.log(`📦 Output size: ${(outputBuffer.length / 1024).toFixed(2)} KB`);
     
     res.json({
       success: true,
@@ -301,7 +320,7 @@ app.post('/api/add-audio', async (req, res) => {
 // Start server
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Video Sequencer API v2.7.0 running on port ${PORT}`);
+  console.log(`🚀 Video Sequencer API v2.7.1 running on port ${PORT}`);
   console.log(`📹 /api/sequence-videos - Multiple videos → One video`);
   console.log(`🎵 /api/add-audio - Single video + audio → Final video`);
 });
