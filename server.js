@@ -387,10 +387,10 @@ app.post('/api/add-audio', async (req, res) => {
   }
 });
 
-// ENDPOINT 3: WORKING SUBTITLES (EXACT VIDEO SEQUENCING PATTERN)
+// ENDPOINT 3: TEST WITHOUT VIDEO FILTERS (PURE VIDEO SEQUENCING APPROACH)
 app.post('/api/add-subtitles', async (req, res) => {
   const startTime = Date.now();
-  console.log('📝 [SUBTITLES] WORKING VERSION - EXACT VIDEO SEQUENCING PATTERN');
+  console.log('📝 [SUBTITLES] TEST - NO VIDEO FILTERS, PURE VIDEO SEQUENCING');
   
   try {
     const { video_url, subtitles } = req.body;
@@ -403,7 +403,7 @@ app.post('/api/add-subtitles', async (req, res) => {
     }
     
     console.log(`📹 [SUBTITLES] Video: ${video_url}`);
-    console.log(`📝 [SUBTITLES] Using PROVEN video sequencing approach`);
+    console.log(`🧪 [SUBTITLES] Testing WITHOUT video filters (like video sequencing)`);
     
     const tempDir = '/tmp';
     if (!fs.existsSync(tempDir)) {
@@ -418,59 +418,74 @@ app.post('/api/add-subtitles', async (req, res) => {
     
     const videoBuffer = await videoResponse.buffer();
     
-    // EXACT SAME PATTERN AS VIDEO SEQUENCING - Simple naming
+    // EXACT SAME PATTERN AS VIDEO SEQUENCING
     const originalPath = path.join(tempDir, 'subtitle_original.mp4');
     const processedPath = path.join(tempDir, 'subtitle_processed.mp4');
     
     fs.writeFileSync(originalPath, videoBuffer);
     console.log(`✅ [SUBTITLES] Video saved: ${(videoBuffer.length / 1024).toFixed(2)} KB`);
-    console.log(`🔧 [SUBTITLES] Input: ${originalPath}`);
-    console.log(`🔧 [SUBTITLES] Output: ${processedPath}`);
     
-    // EXACT SAME PROCESSING PATTERN AS VIDEO SEQUENCING
-    console.log('🔄 [SUBTITLES] Processing with EXACT video sequencing pattern...');
+    // TEST 1: EXACT VIDEO SEQUENCING WITHOUT ANY FILTERS
+    console.log('🧪 [TEST 1] Exact video sequencing (NO video filters)...');
     
-    await new Promise((resolve, reject) => {
-      // SAME TIMEOUT AS VIDEO SEQUENCING
-      const timeout = setTimeout(() => {
-        reject(new Error('Processing timeout'));
-      }, 20000);
+    try {
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error('Processing timeout'));
+        }, 20000);
+        
+        ffmpeg(originalPath)
+          .inputOptions(['-ss', '0'])     // SAME AS VIDEO SEQUENCING
+          .outputOptions([
+            '-t', '5',                    // SAME AS VIDEO SEQUENCING
+            '-c:v', 'libx264',           // SAME AS VIDEO SEQUENCING
+            '-c:a', 'aac',               // SAME AS VIDEO SEQUENCING
+            '-preset', 'ultrafast',       // SAME AS VIDEO SEQUENCING
+            '-crf', '30',                // SAME AS VIDEO SEQUENCING
+            '-r', '20'                   // SAME AS VIDEO SEQUENCING
+            // NO VIDEO FILTERS - EXACTLY LIKE VIDEO SEQUENCING
+          ])
+          .output(processedPath)
+          .on('end', () => {
+            clearTimeout(timeout);
+            console.log(`✅ [TEST 1] SUCCESS - Video processed without filters!`);
+            resolve();
+          })
+          .on('error', (err) => {
+            clearTimeout(timeout);
+            console.error(`❌ [TEST 1] Failed:`, err.message);
+            reject(err);
+          })
+          .run();
+      });
       
-      ffmpeg(originalPath)
-        .inputOptions(['-ss', '0'])     // SAME INPUT OPTIONS
-        .outputOptions([
-          '-t', '10',                   // SAME DURATION LIMIT
-          '-c:v', 'libx264',           // SAME CODEC
-          '-c:a', 'aac',               // SAME AUDIO
-          '-preset', 'ultrafast',       // SAME PRESET
-          '-crf', '30',                // SAME QUALITY
-          '-vf', 'drawtext=text=SUBTITLE_TEST:fontsize=50:fontcolor=red:x=100:y=100', // SIMPLE SUBTITLE
-          '-r', '20'                   // SAME FRAMERATE
-        ])
-        .output(processedPath)          // SAME OUTPUT PATTERN
-        .on('end', () => {
-          clearTimeout(timeout);
-          console.log(`✅ [SUBTITLES] Processed successfully using video sequencing pattern!`);
-          resolve();
-        })
-        .on('error', (err) => {
-          clearTimeout(timeout);
-          console.error(`❌ [SUBTITLES] Failed:`, err.message);
-          reject(err);
-        })
-        .run();
-    });
+      console.log('🎉 [TEST 1] BREAKTHROUGH! Video processing works without filters!');
+      
+    } catch (test1Error) {
+      console.log('❌ [TEST 1] Even no-filter processing failed:', test1Error.message);
+      
+      // TEST 2: SIMPLE COPY (LIKE VIDEO SEQUENCING FALLBACK)
+      console.log('🧪 [TEST 2] Simple copy test...');
+      
+      try {
+        fs.copyFileSync(originalPath, processedPath);
+        console.log('✅ [TEST 2] Copy successful');
+      } catch (copyError) {
+        console.log('❌ [TEST 2] Even copy failed:', copyError.message);
+        throw copyError;
+      }
+    }
     
-    // SAME FILE VERIFICATION AS VIDEO SEQUENCING
+    // Check if output exists
     if (!fs.existsSync(processedPath)) {
-      console.log('⚠️ [SUBTITLES] Output missing, copying original');
+      console.log('⚠️ [SUBTITLES] No output file, copying original');
       fs.copyFileSync(originalPath, processedPath);
     }
     
     const outputBuffer = fs.readFileSync(processedPath);
     const base64Video = outputBuffer.toString('base64');
     
-    // SAME CLEANUP AS VIDEO SEQUENCING
+    // Cleanup
     [originalPath, processedPath].forEach(file => {
       try { 
         fs.unlinkSync(file); 
@@ -480,43 +495,26 @@ app.post('/api/add-subtitles', async (req, res) => {
     const totalTime = Date.now() - startTime;
     const sizeDiff = outputBuffer.length - videoBuffer.length;
     
-    console.log(`🎉 [SUBTITLES] SUCCESS using video sequencing pattern!`);
-    console.log(`📊 [SUBTITLES] Original: ${(videoBuffer.length / 1024).toFixed(2)} KB → Output: ${(outputBuffer.length / 1024).toFixed(2)} KB`);
+    console.log(`🎉 [SUBTITLES] TEST COMPLETE!`);
     console.log(`📊 [SUBTITLES] Size change: ${(sizeDiff / 1024).toFixed(2)} KB`);
     
     res.json({
       success: true,
-      message: `Subtitles processed using proven video sequencing pattern!`,
+      message: `TEST: Processing without video filters (like video sequencing)`,
       videoData: `data:video/mp4;base64,${base64Video}`,
       size: outputBuffer.length,
       originalSize: videoBuffer.length,
       sizeDifference: sizeDiff,
       processingTimeMs: totalTime,
-      note: 'Look for red "SUBTITLE_TEST" text in top-left area'
+      note: 'Testing if video processing works without any filters'
     });
     
   } catch (error) {
-    console.error('💥 [SUBTITLES] Error:', error.message);
-    
-    // SAME FALLBACK AS VIDEO SEQUENCING
-    try {
-      const videoResponse = await fetch(req.body.video_url, { timeout: 30000 });
-      const videoBuffer = await videoResponse.buffer();
-      const base64Video = videoBuffer.toString('base64');
-      
-      res.json({
-        success: true,
-        message: 'Fallback: Original video returned',
-        videoData: `data:video/mp4;base64,${base64Video}`,
-        size: videoBuffer.length,
-        note: 'Subtitle processing failed, original video returned'
-      });
-    } catch (fallbackError) {
-      res.status(500).json({
-        success: false,
-        error: error.message
-      });
-    }
+    console.error('💥 [SUBTITLES] Test failed:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
   }
 });
 
